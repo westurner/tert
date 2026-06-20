@@ -1,0 +1,9 @@
+target/
+build.log
+reports/
+__pycache__
+*.pyc
+*.pyo
+*.so
+*.egg-info/
+tmp/

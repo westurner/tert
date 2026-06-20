@@ -1,0 +1,36 @@
+[package]
+name = "tert"
+version = "0.1.0"
+edition = "2021"
+description = "Test Execution Report Tracker - Rust integration for Python"
+license = "MIT"
+
+[dependencies]
+pyo3 = { version = "0.28.3", features = ["extension-module"] }
+insta = "1"
+regex = "1"
+which = "5"
+libc = "0.2"
+chrono = "0.4"
+rusqlite = { version = "0.30", features = ["bundled"] }
+
+[lib]
+name = "tert"
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "shellwrap"
+path = "src/bin/shellwrap.rs"
+
+[[bin]]
+name = "run_tests"
+path = "src/bin/run_tests.rs"
+
+[profile.release]
+opt-level = 3
+lto = true
+
+[dev-dependencies]
+insta = { version = "1", features = ["redactions"] }
+rstest = "0.18"
+tempfile = "3"
