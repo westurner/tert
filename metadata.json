@@ -1,0 +1,28 @@
+{
+  "title": "tert replog",
+  "description": "Test run reports and artifacts",
+  "extra_css_urls": [
+    "/static/custom.css"
+  ],
+  "extra_js_urls": [
+    "/static/fts-highlight-config.js",
+    "/static/search-highlight.js"
+  ],
+  "databases": {
+    "replog": {
+      "title": "replog",
+      "tables": {
+        "test_runs": {
+          "title": "Test Runs",
+          "sort_desc": "epoch_ns",
+          "fts_table": "test_runs_fts"
+        },
+        "test_artifacts": {
+          "title": "Test Artifacts",
+          "sort_desc": "epoch_ns",
+          "fts_table": "test_artifacts_fts"
+        }
+      }
+    }
+  }
+}

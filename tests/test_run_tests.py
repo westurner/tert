@@ -18,6 +18,7 @@ os.environ["PYTEST_RUNNING"] = "1"
 from tert.run_tests import (
     ReplogDB,
     TertTestRun,
+    _format_timestamp_ns,
     get_runner,
     PytestRunner,
     CargoRunner,
@@ -60,12 +61,12 @@ def replog_db(tmp_reports_dir):
 @pytest.fixture
 def sample_test_run(tmp_reports_dir):
     """Sample TestRun object."""
-    out_dir = tmp_reports_dir / "1234567890-2024-01-01T00-00-00+0000"
+    out_dir = tmp_reports_dir / "1704067200-2024-01-01T00-00-00+0000"
     out_dir.mkdir(parents=True, exist_ok=True)
     return TertTestRun(
-        epoch=1234567890,
+        timestamp_ns="2024-01-01T00:00:00.000000000+00:00",
+        epoch_ns=1704067200_000_000_000,
         exit_code=0,
-        timestamp="2024-01-01T00:00:00+00:00",
         out_dir=out_dir,
     )
 
@@ -109,17 +110,21 @@ class TestReplogDB:
         replog_db.insert_run(sample_test_run)
         runs = replog_db.query_runs()
         assert len(runs) == 1
-        assert runs[0]['epoch'] == sample_test_run.epoch
+        assert runs[0]['timestamp_ns'] == sample_test_run.timestamp_ns
+        assert runs[0]['epoch_ns'] == sample_test_run.epoch_ns
         assert runs[0]['exit_code'] == 0
     
     def test_insert_and_query_artifacts(self, replog_db, sample_test_run):
         """Test inserting and querying artifacts."""
+        replog_db.insert_run(sample_test_run)  # run must exist for FK
         replog_db.insert_artifact(
-            sample_test_run.epoch,
+            sample_test_run.timestamp_ns,
+            sample_test_run.epoch_ns,
             sample_test_run.out_dir,
             "build.log",
             "test content",
-            "pytest tests/"
+            "pytest tests/",
+            sample_test_run.exit_code,
         )
         artifacts = replog_db.query_artifacts()
         assert len(artifacts) == 1
@@ -128,12 +133,14 @@ class TestReplogDB:
     
     def test_query_artifacts_filter_by_outdir(self, replog_db, sample_test_run):
         """Test filtering artifacts by output directory."""
+        replog_db.insert_run(sample_test_run)  # run must exist for FK
         replog_db.insert_artifact(
-            sample_test_run.epoch,
+            sample_test_run.timestamp_ns,
+            sample_test_run.epoch_ns,
             sample_test_run.out_dir,
             "build.log",
             "content1",
-            "pytest tests/"
+            "pytest tests/",
         )
         
         # Query with specific out_dir
@@ -257,12 +264,14 @@ def test_query_runs_returns_list(replog_db, sample_test_run):
 
 def test_query_artifacts_returns_list(replog_db, sample_test_run):
     """Test that query_artifacts returns a list."""
+    replog_db.insert_run(sample_test_run)  # run must exist for FK
     replog_db.insert_artifact(
-        sample_test_run.epoch,
+        sample_test_run.epoch_ns,
+        sample_test_run.timestamp_ns,
         sample_test_run.out_dir,
         "test.log",
         "content",
-        "pytest tests/"
+        "pytest tests/",
     )
     artifacts = query_artifacts(replog_db)
     assert isinstance(artifacts, list)
@@ -270,13 +279,15 @@ def test_query_artifacts_returns_list(replog_db, sample_test_run):
 
 def test_query_artifacts_includes_byte_count(replog_db, sample_test_run):
     """Test that query_artifacts includes byte count."""
+    replog_db.insert_run(sample_test_run)  # run must exist for FK
     content = "test content with some length"
     replog_db.insert_artifact(
-        sample_test_run.epoch,
+        sample_test_run.epoch_ns,
+        sample_test_run.timestamp_ns,
         sample_test_run.out_dir,
         "test.log",
         content,
-        "pytest tests/"
+        "pytest tests/",
     )
     artifacts = query_artifacts(replog_db)
     assert artifacts[0]['bytes'] == len(content)
@@ -483,3 +494,168 @@ class TestColorOutput:
         finally:
             os.environ.clear()
             os.environ.update(original_env)
+
+
+# ============================================================================
+# TESTS: _format_timestamp_ns
+# ============================================================================
+
+class TestFormatTimestampNs:
+    """Test _format_timestamp_ns helper."""
+
+    def test_format_has_nine_decimal_places(self):
+        """Output must have 9-digit nanosecond fraction."""
+        ts = _format_timestamp_ns(0)
+        dot_idx = ts.index('.')
+        nano_part = ts[dot_idx + 1: dot_idx + 10]
+        assert len(nano_part) == 9
+        assert nano_part.isdigit()
+
+    def test_format_ends_with_utc_offset(self):
+        """Output must end with +00:00."""
+        ts = _format_timestamp_ns(1_000_000_000)
+        assert ts.endswith('+00:00')
+
+    def test_format_epoch_zero(self):
+        """Epoch 0 maps to 1970-01-01T00:00:00."""
+        ts = _format_timestamp_ns(0)
+        assert ts.startswith('1970-01-01T00:00:00.')
+
+    def test_format_nanoseconds_preserved(self):
+        """Sub-second nanoseconds are encoded correctly."""
+        # 1 second + 123456789 nanoseconds
+        ns = 1_000_000_000 + 123_456_789
+        ts = _format_timestamp_ns(ns)
+        assert '.123456789+00:00' in ts
+
+    def test_format_whole_seconds(self):
+        """Whole-second timestamps have all-zero nanoseconds."""
+        ns = 1_704_067_200 * 1_000_000_000  # 2024-01-01T00:00:00 UTC
+        ts = _format_timestamp_ns(ns)
+        assert '.000000000+00:00' in ts
+
+
+# ============================================================================
+# TESTS: Schema v3 migration
+# ============================================================================
+
+class TestMigrateV3:
+    """Test migration from epoch-keyed v2 databases to timestamp_ns PK."""
+
+    def _make_v2_db(self, db_path):
+        """Create a minimal v2-style database with epoch as PK."""
+        import sqlite3 as _sqlite3
+        with _sqlite3.connect(db_path) as con:
+            con.executescript("""
+                CREATE TABLE schema_version (version INTEGER PRIMARY KEY, applied_at TEXT);
+                INSERT INTO schema_version VALUES (2, datetime('now'));
+                CREATE TABLE test_runs (
+                    epoch INTEGER PRIMARY KEY, exit_code INTEGER,
+                    command TEXT DEFAULT '', timestamp TEXT, out_dir TEXT
+                );
+                CREATE TABLE test_artifacts (
+                    epoch INTEGER, out_dir TEXT, filename TEXT, content TEXT,
+                    command TEXT DEFAULT '', full_path TEXT,
+                    PRIMARY KEY (epoch, filename)
+                );
+                INSERT INTO test_runs VALUES (1700000000, 0, 'pytest', '2023-11-14', 'reports/r1');
+                INSERT INTO test_artifacts
+                    VALUES (1700000000, 'reports/r1', 'build.log', 'data', 'pytest', 'reports/r1/build.log');
+            """)
+
+    def test_migrate_v3_upgrades_epoch_schema(self, tmp_path):
+        """ReplogDB opens a v2 db and upgrades it to v3 (timestamp_ns PK)."""
+        db_path = tmp_path / "v2.db"
+        self._make_v2_db(str(db_path))
+
+        db = ReplogDB(db_path)
+        runs = db.query_runs()
+        assert len(runs) == 1
+        assert runs[0]['timestamp_ns'].endswith('.000000000+00:00'), \
+            "migrated timestamp_ns must have nanosecond suffix"
+
+    def test_migrate_v3_preserves_artifacts(self, tmp_path):
+        """Artifacts survive v3→v5 migration and keep FK linkage."""
+        db_path = tmp_path / "v2art.db"
+        self._make_v2_db(str(db_path))
+
+        db = ReplogDB(db_path)
+        artifacts = db.query_artifacts()
+        assert len(artifacts) == 1
+        runs = db.query_runs()
+        assert artifacts[0]['epoch_ns'] == runs[0]['epoch_ns'], \
+            "migrated artifact must link to its run via epoch_ns (FK)"
+
+    def test_migrate_v3_is_idempotent(self, tmp_path):
+        """Opening an already-v3 database twice does not corrupt it."""
+        db_path = tmp_path / "v3.db"
+        db1 = ReplogDB(db_path)
+        run = TertTestRun(
+            timestamp_ns="2024-06-01T00:00:00.000000000+00:00",
+            epoch_ns=1717200000_000_000_000,
+            exit_code=0,
+            out_dir=tmp_path / "run",
+        )
+        db1.insert_run(run)
+
+        db2 = ReplogDB(db_path)  # re-open triggers _ensure_schema again
+        runs = db2.query_runs()
+        assert len(runs) == 1
+
+    def test_schema_version_is_5_after_migration(self, tmp_path):
+        """schema_version table must record version 5+ after migration."""
+        import sqlite3 as _sqlite3
+        db_path = tmp_path / "ver.db"
+        self._make_v2_db(str(db_path))
+        ReplogDB(db_path)  # trigger migration
+
+        with _sqlite3.connect(db_path) as con:
+            version = con.execute("SELECT MAX(version) FROM schema_version").fetchone()[0]
+        assert version >= 7
+
+
+# ============================================================================
+# TESTS: timestamp_ns FK relationship
+# ============================================================================
+
+class TestTimestampNsForeignKey:
+    """Test that test_artifacts are linked to test_runs via timestamp_ns."""
+
+    def test_artifacts_share_run_timestamp_ns(self, replog_db, sample_test_run):
+        """Multiple artifacts for one run all carry the run's timestamp_ns."""
+        replog_db.insert_run(sample_test_run)
+        for fname in ['build.log', 'coverage.json', 'results.xml']:
+            replog_db.insert_artifact(
+                sample_test_run.epoch_ns,
+                sample_test_run.timestamp_ns,
+                sample_test_run.out_dir,
+                fname,
+                "content",
+                "pytest",
+                sample_test_run.exit_code,
+            )
+
+        artifacts = replog_db.query_artifacts()
+        assert len(artifacts) == 3
+        for a in artifacts:
+            assert a['epoch_ns'] == sample_test_run.epoch_ns
+
+    def test_query_runs_ordered_by_timestamp_ns(self, replog_db):
+        """query_runs returns rows in timestamp_ns DESC order."""
+        runs_data = [
+            ("2024-01-01T00:00:00.000000001+00:00", 1704067200_000_000_001, 0),
+            ("2024-01-01T00:00:00.000000003+00:00", 1704067202_000_000_003, 0),
+            ("2024-01-01T00:00:00.000000002+00:00", 1704067201_000_000_002, 1),
+        ]
+        for ts, epoch_ns, ec in runs_data:
+            replog_db.insert_run(TertTestRun(
+                timestamp_ns=ts, epoch_ns=epoch_ns, exit_code=ec,
+                out_dir=replog_db.db_path.parent / f"run{epoch_ns}",
+            ))
+
+        runs = replog_db.query_runs()
+        assert len(runs) == 3
+        # Must be sorted descending by timestamp_ns
+        timestamps = [r['timestamp_ns'] for r in runs]
+        assert timestamps == sorted(timestamps, reverse=True)
+

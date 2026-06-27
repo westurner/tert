@@ -19,7 +19,8 @@ import sqlite3
 import subprocess
 import argparse
 import logging
-from datetime import datetime
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 from dataclasses import dataclass
@@ -40,12 +41,20 @@ def _run_command(cmd: List[str], *args, **kwargs) -> subprocess.CompletedProcess
     return subprocess.run(cmd, *args, **kwargs)
 
 
+def _format_timestamp_ns(ns: int) -> str:
+    """Format a nanosecond-resolution UNIX timestamp as ISO8601 with 9 decimal places."""
+    secs = ns // 1_000_000_000
+    nanos = ns % 1_000_000_000
+    dt = datetime.fromtimestamp(secs, tz=timezone.utc)
+    return dt.strftime('%Y-%m-%dT%H:%M:%S') + f'.{nanos:09d}+00:00'
+
+
 @dataclass
 class TertTestRun:
     """Metadata for a single test run."""
-    epoch: int
+    timestamp_ns: str
+    epoch_ns: int
     exit_code: int
-    timestamp: str
     out_dir: Path
     command: str = ""
 
@@ -61,9 +70,15 @@ class ReplogDB:
     def _ensure_schema(self):
         """Create tables if they don't exist and migrate schema if needed."""
 
-        print("tert database: %s ..." % self.db_path)
+        logger.info("tert database: %s ..." % self.db_path)
+
+        # Enable WAL mode first — persists in the db file, benefits all subsequent connections
+        with sqlite3.connect(self.db_path) as _wal:
+            _wal.execute("PRAGMA journal_mode = WAL")
 
         with sqlite3.connect(self.db_path) as con:
+            con.execute("PRAGMA foreign_keys = ON")
+
             # Create schema_version table if it doesn't exist
             con.execute("""
                 CREATE TABLE IF NOT EXISTS schema_version (
@@ -71,95 +86,471 @@ class ReplogDB:
                     applied_at TEXT
                 )
             """)
-            
-            # Create initial tables
-            con.execute("""
-                CREATE TABLE IF NOT EXISTS test_runs (
-                    epoch INTEGER PRIMARY KEY,
-                    exit_code INTEGER,
-                    timestamp TEXT,
-                    out_dir TEXT,
-                    command TEXT DEFAULT ''
-                )
-            """)
-            
-            con.execute("""
-                CREATE TABLE IF NOT EXISTS test_artifacts (
-                    epoch INTEGER,
-                    out_dir TEXT,
-                    filename TEXT,
-                    content TEXT,
-                    command TEXT DEFAULT '',
-                    full_path TEXT,
-                    PRIMARY KEY (epoch, filename)
-                )
-            """)
-            
+
             # Get current schema version
             cursor = con.execute("SELECT MAX(version) FROM schema_version")
             result = cursor.fetchone()
             current_version = result[0] if result[0] else 0
-            
-            # Migrate to version 1 if needed
+
+            # Apply migrations in order
             if current_version < 1:
                 logger.debug("Migrating schema to version 1")
-                con.execute("INSERT INTO schema_version (version, applied_at) VALUES (1, datetime('now'))")
+                self._migrate_v1(con)
                 current_version = 1
-            
-            # Migrate to version 2 if needed (add command and full_path)
+
             if current_version < 2:
                 logger.debug("Migrating schema to version 2")
-                # These columns were already created in the initial CREATE TABLE
-                # Just mark the migration as complete
-                con.execute("INSERT INTO schema_version (version, applied_at) VALUES (2, datetime('now'))")
-                # Compute full_path for existing rows
-                con.execute("UPDATE test_artifacts SET full_path = out_dir || '/' || filename WHERE full_path IS NULL")
+                self._migrate_v2(con)
+                current_version = 2
+
+            if current_version < 3:
+                logger.debug("Migrating schema to version 3")
+                self._migrate_v3(con)
+                current_version = 3
+
+            if current_version < 4:
+                logger.debug("Migrating schema to version 4")
+                self._migrate_v4(con)
+                current_version = 4
+
+            if current_version < 5:
+                logger.debug("Migrating schema to version 5")
+                self._migrate_v5(con)
+                current_version = 5
+
+            if current_version < 6:
+                logger.debug("Migrating schema to version 6")
+                self._migrate_v6(con)
+                current_version = 6
+
+            if current_version < 7:
+                logger.debug("Migrating schema to version 7")
+                self._migrate_v7(con)
+                current_version = 7
+
+            if current_version < 8:
+                logger.debug("Migrating schema to version 8")
+                self._migrate_v8(con)
+                current_version = 8
 
             con.commit()
-    
+
+    def _migrate_v1(self, con: "sqlite3.Connection") -> None:
+        """Create full v5 schema for new databases, with WAL and FTS5."""
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS test_runs (
+                epoch_ns INTEGER PRIMARY KEY,
+                exit_code INTEGER,
+                command TEXT DEFAULT '',
+                out_dir TEXT,
+                timestamp_ns TEXT
+            )
+        """)
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS test_artifacts (
+                epoch_ns INTEGER NOT NULL,
+                exit_code INTEGER,
+                command TEXT DEFAULT '',
+                filename TEXT,
+                content TEXT,
+                out_dir TEXT,
+                timestamp_ns TEXT,
+                full_path TEXT,
+                PRIMARY KEY (epoch_ns, filename)
+            )
+        """)
+        con.execute("INSERT INTO schema_version (version, applied_at) VALUES (1, datetime('now'))")
+        # FTS5 tables and triggers are added by _migrate_v6
+
+    def _migrate_v2(self, con: "sqlite3.Connection") -> None:
+        """Add command and full_path columns to v1 databases (no-op for new databases)."""
+        try:
+            con.execute("ALTER TABLE test_runs ADD COLUMN command TEXT DEFAULT ''")
+        except sqlite3.OperationalError:
+            pass  # Column already exists
+        try:
+            con.execute("ALTER TABLE test_artifacts ADD COLUMN command TEXT DEFAULT ''")
+        except sqlite3.OperationalError:
+            pass
+        try:
+            con.execute("ALTER TABLE test_artifacts ADD COLUMN full_path TEXT")
+        except sqlite3.OperationalError:
+            pass
+        con.execute("UPDATE test_artifacts SET full_path = out_dir || '/' || filename WHERE full_path IS NULL")
+        con.execute("INSERT INTO schema_version (version, applied_at) VALUES (2, datetime('now'))")
+
+    def _migrate_v3(self, con: "sqlite3.Connection") -> None:
+        """Upgrade epoch-keyed v1/v2 databases to v5 schema (epoch_ns PK, exit_code in artifacts)."""
+        cursor = con.execute("PRAGMA table_info(test_runs)")
+        columns = {row[1] for row in cursor.fetchall()}
+        if 'timestamp_ns' not in columns:
+            # Disable FK enforcement during table reconstruction
+            con.execute("PRAGMA foreign_keys = OFF")
+            con.execute("ALTER TABLE test_artifacts RENAME TO test_artifacts_old")
+            con.execute("ALTER TABLE test_runs RENAME TO test_runs_old")
+            con.execute("""
+                CREATE TABLE test_runs (
+                    epoch_ns INTEGER PRIMARY KEY,
+                    exit_code INTEGER,
+                    command TEXT DEFAULT '',
+                    out_dir TEXT,
+                    timestamp_ns TEXT
+                )
+            """)
+            con.execute("""
+                INSERT OR IGNORE INTO test_runs (epoch_ns, exit_code, command, out_dir, timestamp_ns)
+                SELECT epoch * 1000000000, exit_code, COALESCE(command, ''), out_dir,
+                       CAST(epoch AS TEXT) || '.000000000+00:00'
+                FROM test_runs_old
+            """)
+            con.execute("""
+                CREATE TABLE test_artifacts (
+                    epoch_ns INTEGER NOT NULL,
+                    exit_code INTEGER,
+                    command TEXT DEFAULT '',
+                    filename TEXT,
+                    content TEXT,
+                    out_dir TEXT,
+                    timestamp_ns TEXT,
+                    full_path TEXT,
+                    PRIMARY KEY (epoch_ns, filename)
+                )
+            """)
+            con.execute("""
+                INSERT OR IGNORE INTO test_artifacts
+                    (epoch_ns, exit_code, command, filename, content, out_dir, timestamp_ns, full_path)
+                SELECT ta.epoch * 1000000000,
+                       COALESCE(tr.exit_code, 0),
+                       COALESCE(ta.command, ''),
+                       ta.filename, ta.content, ta.out_dir,
+                       CAST(ta.epoch AS TEXT) || '.000000000+00:00',
+                       COALESCE(ta.full_path, ta.out_dir || '/' || ta.filename)
+                FROM test_artifacts_old ta
+                LEFT JOIN test_runs_old tr ON ta.epoch = tr.epoch
+            """)
+            con.execute("DROP TABLE test_artifacts_old")
+            con.execute("DROP TABLE test_runs_old")
+            con.execute("PRAGMA foreign_keys = ON")
+        con.execute("INSERT INTO schema_version (version, applied_at) VALUES (3, datetime('now'))")
+
+    def _migrate_v4(self, con: "sqlite3.Connection") -> None:
+        """Upgrade v3 databases (timestamp_ns PK, epoch seconds): convert to v5 schema with epoch_ns PK."""
+        cursor = con.execute("PRAGMA table_info(test_runs)")
+        columns = {row[1] for row in cursor.fetchall()}
+        if 'epoch_ns' not in columns:
+            con.execute("PRAGMA foreign_keys = OFF")
+            con.execute("ALTER TABLE test_artifacts RENAME TO test_artifacts_old")
+            con.execute("ALTER TABLE test_runs RENAME TO test_runs_old")
+            con.execute("""
+                CREATE TABLE test_runs (
+                    epoch_ns INTEGER PRIMARY KEY,
+                    command TEXT DEFAULT '',
+                    exit_code INTEGER,
+                    out_dir TEXT,
+                    timestamp_ns TEXT
+                )
+            """)
+            con.execute("""
+                INSERT OR IGNORE INTO test_runs (epoch_ns, exit_code, command, out_dir, timestamp_ns)
+                SELECT epoch * 1000000000, exit_code, COALESCE(command, ''), out_dir, timestamp_ns
+                FROM test_runs_old
+            """)
+            con.execute("""
+                CREATE TABLE test_artifacts (
+                    epoch_ns INTEGER NOT NULL,
+                    command TEXT DEFAULT '',
+                    exit_code INTEGER,
+                    filename TEXT,
+                    content TEXT,
+                    out_dir TEXT,
+                    timestamp_ns TEXT,
+                    full_path TEXT,
+                    PRIMARY KEY (epoch_ns, filename)
+                )
+            """)
+            con.execute("""
+                INSERT OR IGNORE INTO test_artifacts
+                    (epoch_ns, exit_code, command, filename, content, out_dir, timestamp_ns, full_path)
+                SELECT ta.epoch * 1000000000,
+                       COALESCE(tr.exit_code, 0),
+                       COALESCE(ta.command, ''),
+                       ta.filename, ta.content, ta.out_dir, ta.timestamp_ns,
+                       COALESCE(ta.full_path, ta.out_dir || '/' || ta.filename)
+                FROM test_artifacts_old ta
+                LEFT JOIN test_runs_old tr ON ta.timestamp_ns = tr.timestamp_ns
+            """)
+            con.execute("DROP TABLE test_artifacts_old")
+            con.execute("DROP TABLE test_runs_old")
+            con.execute("PRAGMA foreign_keys = ON")
+        con.execute("INSERT INTO schema_version (version, applied_at) VALUES (4, datetime('now'))")
+
+    def _migrate_v5(self, con: "sqlite3.Connection") -> None:
+        """Upgrade v4 databases (timestamp_ns PK, epoch_ns INTEGER): make epoch_ns PK, add exit_code to artifacts."""
+        # Detect by checking if epoch_ns is the primary key in test_runs
+        cursor = con.execute("PRAGMA table_info(test_runs)")
+        rows = cursor.fetchall()
+        epoch_ns_is_pk = any(row[1] == 'epoch_ns' and row[5] == 1 for row in rows)
+        if not epoch_ns_is_pk:
+            con.execute("PRAGMA foreign_keys = OFF")
+            con.execute("ALTER TABLE test_artifacts RENAME TO test_artifacts_old")
+            con.execute("ALTER TABLE test_runs RENAME TO test_runs_old")
+            con.execute("""
+                CREATE TABLE test_runs (
+                    epoch_ns INTEGER PRIMARY KEY,
+                    command TEXT DEFAULT '',
+                    exit_code INTEGER,
+                    out_dir TEXT,
+                    timestamp_ns TEXT
+                )
+            """)
+            con.execute("""
+                INSERT OR IGNORE INTO test_runs (epoch_ns, exit_code, command, out_dir, timestamp_ns)
+                SELECT epoch_ns, exit_code, COALESCE(command, ''), out_dir, timestamp_ns
+                FROM test_runs_old
+            """)
+            con.execute("""
+                CREATE TABLE test_artifacts (
+                    epoch_ns INTEGER NOT NULL,
+                    command TEXT DEFAULT '',
+                    exit_code INTEGER,
+                    filename TEXT,
+                    content TEXT,
+                    out_dir TEXT,
+                    timestamp_ns TEXT,
+                    full_path TEXT,
+                    PRIMARY KEY (epoch_ns, filename)
+                )
+            """)
+            con.execute("""
+                INSERT OR IGNORE INTO test_artifacts
+                    (epoch_ns, exit_code, command, filename, content, out_dir, timestamp_ns, full_path)
+                SELECT ta.epoch_ns,
+                       COALESCE(tr.exit_code, 0),
+                       COALESCE(ta.command, ''),
+                       ta.filename, ta.content, ta.out_dir, ta.timestamp_ns,
+                       COALESCE(ta.full_path, ta.out_dir || '/' || ta.filename)
+                FROM test_artifacts_old ta
+                LEFT JOIN test_runs_old tr ON ta.epoch_ns = tr.epoch_ns
+            """)
+            con.execute("DROP TABLE test_artifacts_old")
+            con.execute("DROP TABLE test_runs_old")
+            con.execute("PRAGMA foreign_keys = ON")
+        con.execute("INSERT INTO schema_version (version, applied_at) VALUES (5, datetime('now'))")
+
+    def _migrate_v6(self, con: "sqlite3.Connection") -> None:
+        """Add FTS5 content tables and sync triggers for Datasette auto-detection."""
+        self._setup_fts_content_tables(con)
+        con.execute("INSERT INTO schema_version (version, applied_at) VALUES (6, datetime('now'))")
+
+    def _migrate_v8(self, con: "sqlite3.Connection") -> None:
+        """Rebuild FTS as content tables so Datasette auto-detects them.
+
+        DBs migrated through v6/v7 have standalone FTS5 tables (no content= option).
+        Datasette only auto-detects FTS when CREATE VIRTUAL TABLE uses content=.
+        For test_runs, epoch_ns INTEGER PRIMARY KEY is a rowid alias so
+        content_rowid='epoch_ns' makes FTS rowid == epoch_ns for correct linkback.
+        For test_artifacts (composite PK), FTS uses the table's internal rowid.
+        """
+        # Drop old standalone FTS tables and triggers
+        for name in ('test_runs_fts', 'test_artifacts_fts'):
+            con.execute(f"DROP TABLE IF EXISTS {name}")
+        for t in ('test_runs_ai', 'test_runs_ad', 'test_runs_au',
+                  'test_artifacts_ai', 'test_artifacts_ad', 'test_artifacts_au'):
+            con.execute(f"DROP TRIGGER IF EXISTS {t}")
+        self._setup_fts_content_tables(con)
+        con.execute("INSERT INTO schema_version (version, applied_at) VALUES (8, datetime('now'))")
+
+    def _setup_fts_content_tables(self, con: "sqlite3.Connection") -> None:
+        """Create FTS5 content tables, populate them, and install sync triggers.
+
+        Used by _migrate_v6 (new databases) and _migrate_v8 (upgrade path).
+        """
+        # test_runs: epoch_ns INTEGER PRIMARY KEY is a SQLite rowid alias.
+        # content_rowid='epoch_ns' makes FTS rowid == epoch_ns so Datasette
+        # can join back from FTS rowid to the source row correctly.
+        con.execute("""
+            CREATE VIRTUAL TABLE IF NOT EXISTS test_runs_fts USING fts5(
+                command, out_dir, timestamp_ns,
+                content="test_runs",
+                content_rowid="epoch_ns"
+            )
+        """)
+        # test_artifacts: composite PK, so FTS uses the table's internal rowid.
+        con.execute("""
+            CREATE VIRTUAL TABLE IF NOT EXISTS test_artifacts_fts USING fts5(
+                epoch_ns UNINDEXED,
+                command, filename, content, out_dir, timestamp_ns,
+                content="test_artifacts"
+            )
+        """)
+        # Populate
+        try:
+            con.execute("""
+                INSERT INTO test_runs_fts(rowid, command, out_dir, timestamp_ns)
+                SELECT epoch_ns, command, out_dir, timestamp_ns FROM test_runs
+            """)
+            con.execute("""
+                INSERT INTO test_artifacts_fts(rowid, epoch_ns, command, filename, content, out_dir, timestamp_ns)
+                SELECT rowid, epoch_ns, command, filename, content, out_dir, timestamp_ns FROM test_artifacts
+            """)
+        except sqlite3.OperationalError:
+            pass  # empty tables on initial migration
+        # Triggers — test_runs (rowid = epoch_ns for content table)
+        con.execute("""
+            CREATE TRIGGER IF NOT EXISTS test_runs_ai AFTER INSERT ON test_runs BEGIN
+                INSERT INTO test_runs_fts(rowid, command, out_dir, timestamp_ns)
+                VALUES (new.epoch_ns, new.command, new.out_dir, new.timestamp_ns);
+            END
+        """)
+        con.execute("""
+            CREATE TRIGGER IF NOT EXISTS test_runs_ad AFTER DELETE ON test_runs BEGIN
+                INSERT INTO test_runs_fts(test_runs_fts, rowid, command, out_dir, timestamp_ns)
+                VALUES ('delete', old.epoch_ns, old.command, old.out_dir, old.timestamp_ns);
+            END
+        """)
+        con.execute("""
+            CREATE TRIGGER IF NOT EXISTS test_runs_au AFTER UPDATE ON test_runs BEGIN
+                INSERT INTO test_runs_fts(test_runs_fts, rowid, command, out_dir, timestamp_ns)
+                VALUES ('delete', old.epoch_ns, old.command, old.out_dir, old.timestamp_ns);
+                INSERT INTO test_runs_fts(rowid, command, out_dir, timestamp_ns)
+                VALUES (new.epoch_ns, new.command, new.out_dir, new.timestamp_ns);
+            END
+        """)
+        # Triggers — test_artifacts (rowid = source table internal rowid)
+        con.execute("""
+            CREATE TRIGGER IF NOT EXISTS test_artifacts_ai AFTER INSERT ON test_artifacts BEGIN
+                INSERT INTO test_artifacts_fts(rowid, epoch_ns, command, filename, content, out_dir, timestamp_ns)
+                VALUES (new.rowid, new.epoch_ns, new.command, new.filename, new.content, new.out_dir, new.timestamp_ns);
+            END
+        """)
+        con.execute("""
+            CREATE TRIGGER IF NOT EXISTS test_artifacts_ad AFTER DELETE ON test_artifacts BEGIN
+                INSERT INTO test_artifacts_fts(test_artifacts_fts, rowid, epoch_ns, command, filename, content, out_dir, timestamp_ns)
+                VALUES ('delete', old.rowid, old.epoch_ns, old.command, old.filename, old.content, old.out_dir, old.timestamp_ns);
+            END
+        """)
+        con.execute("""
+            CREATE TRIGGER IF NOT EXISTS test_artifacts_au AFTER UPDATE ON test_artifacts BEGIN
+                INSERT INTO test_artifacts_fts(test_artifacts_fts, rowid, epoch_ns, command, filename, content, out_dir, timestamp_ns)
+                VALUES ('delete', old.rowid, old.epoch_ns, old.command, old.filename, old.content, old.out_dir, old.timestamp_ns);
+                INSERT INTO test_artifacts_fts(rowid, epoch_ns, command, filename, content, out_dir, timestamp_ns)
+                VALUES (new.rowid, new.epoch_ns, new.command, new.filename, new.content, new.out_dir, new.timestamp_ns);
+            END
+        """)
+
+    def _migrate_v7(self, con: "sqlite3.Connection") -> None:
+        """Reorder columns: move exit_code before command."""
+        cursor = con.execute("PRAGMA table_info(test_runs)")
+        rows = cursor.fetchall()
+        col_order = {row[1]: row[0] for row in rows}
+        if col_order.get('exit_code', 2) > col_order.get('command', 1):
+            # Drop FTS tables and triggers before renaming base tables
+            for name in ('test_runs_fts', 'test_artifacts_fts'):
+                con.execute(f"DROP TABLE IF EXISTS {name}")
+            for t in ('test_runs_ai', 'test_runs_ad', 'test_runs_au',
+                      'test_artifacts_ai', 'test_artifacts_ad', 'test_artifacts_au'):
+                con.execute(f"DROP TRIGGER IF EXISTS {t}")
+            con.execute("ALTER TABLE test_artifacts RENAME TO test_artifacts_old")
+            con.execute("ALTER TABLE test_runs RENAME TO test_runs_old")
+            con.execute("""
+                CREATE TABLE test_runs (
+                    epoch_ns INTEGER PRIMARY KEY,
+                    exit_code INTEGER,
+                    command TEXT DEFAULT '',
+                    out_dir TEXT,
+                    timestamp_ns TEXT
+                )
+            """)
+            con.execute("""
+                INSERT OR IGNORE INTO test_runs (epoch_ns, exit_code, command, out_dir, timestamp_ns)
+                SELECT epoch_ns, exit_code, command, out_dir, timestamp_ns FROM test_runs_old
+            """)
+            con.execute("""
+                CREATE TABLE test_artifacts (
+                    epoch_ns INTEGER NOT NULL,
+                    exit_code INTEGER,
+                    command TEXT DEFAULT '',
+                    filename TEXT,
+                    content TEXT,
+                    out_dir TEXT,
+                    timestamp_ns TEXT,
+                    full_path TEXT,
+                    PRIMARY KEY (epoch_ns, filename)
+                )
+            """)
+            con.execute("""
+                INSERT OR IGNORE INTO test_artifacts
+                    (epoch_ns, exit_code, command, filename, content, out_dir, timestamp_ns, full_path)
+                SELECT epoch_ns, exit_code, command, filename, content, out_dir, timestamp_ns, full_path
+                FROM test_artifacts_old
+            """)
+            con.execute("DROP TABLE test_artifacts_old")
+            con.execute("DROP TABLE test_runs_old")
+            # Recreate FTS tables and triggers inline (no schema_version insert)
+            self._setup_fts_content_tables(con)
+        con.execute("INSERT INTO schema_version (version, applied_at) VALUES (7, datetime('now'))")
+
     def insert_run(self, run: TertTestRun):
         """Store a test run record."""
         with sqlite3.connect(self.db_path) as con:
-            sql = "INSERT OR REPLACE INTO test_runs (epoch, exit_code, timestamp, out_dir, command) VALUES (?, ?, ?, ?, ?)"
-            params = (run.epoch, run.exit_code, run.timestamp, str(run.out_dir), run.command)
+            sql = "INSERT OR REPLACE INTO test_runs (epoch_ns, exit_code, command, out_dir, timestamp_ns) VALUES (?, ?, ?, ?, ?)"
+            params = (run.epoch_ns, run.exit_code, run.command, str(run.out_dir), run.timestamp_ns)
             logger.debug(f"SQL: {sql} with params {params}")
             con.execute(sql, params)
             con.commit()
     
-    def insert_artifact(self, epoch: int, out_dir: Path, filename: str, content: str, command: str = ""):
-        """Store a build artifact."""
+    def insert_artifact(self, epoch_ns: int, timestamp_ns: str, out_dir: Path, filename: str, content: str, command: str = "", exit_code: int = 0):
+        """Store a build artifact linked to a test run by epoch_ns."""
         full_path = str(out_dir / filename)
         with sqlite3.connect(self.db_path) as con:
-            sql = "INSERT OR REPLACE INTO test_artifacts (epoch, out_dir, filename, content, command, full_path) VALUES (?, ?, ?, ?, ?, ?)"
-            params = (epoch, str(out_dir), filename, content, command, full_path)
-            logger.debug(f"SQL: {sql} with params (epoch={epoch}, out_dir={out_dir}, filename={filename}, content_len={len(content)}, command={command})")
+            sql = "INSERT OR REPLACE INTO test_artifacts (epoch_ns, exit_code, command, filename, content, out_dir, timestamp_ns, full_path) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+            params = (epoch_ns, exit_code, command, filename, content, str(out_dir), timestamp_ns, full_path)
+            logger.debug(f"SQL: {sql} with params (epoch_ns={epoch_ns}, command={command}, exit_code={exit_code}, filename={filename}, content_len={len(content)}, out_dir={out_dir})")
             con.execute(sql, params)
             con.commit()
     
     def query_runs(self, limit: int = 100) -> List[Dict[str, Any]]:
-        """Get recent test runs."""
+        """Get recent test runs, ordered by epoch_ns descending."""
         with sqlite3.connect(self.db_path) as con:
-            con.row_factory = sqlite3.Row
-            sql = "SELECT epoch, exit_code, timestamp, out_dir FROM test_runs ORDER BY epoch DESC LIMIT ?"
+            sql = "SELECT epoch_ns, exit_code, command, out_dir, timestamp_ns FROM test_runs ORDER BY epoch_ns DESC LIMIT ?"
             logger.debug(f"SQL: {sql} with params (limit={limit})")
             rows = con.execute(sql, (limit,)).fetchall()
-            return [dict(row) for row in rows]
+            return [
+                {
+                    'epoch_ns': row[0],
+                    'exit_code': row[1],
+                    'command': row[2],
+                    'out_dir': row[3],
+                    'timestamp_ns': row[4],
+                }
+                for row in rows
+            ]
     
     def query_artifacts(self, out_dir: Optional[str] = None) -> List[Dict[str, Any]]:
-        """List stored artifacts."""
-        query = "SELECT epoch, filename, length(content) as bytes, out_dir FROM test_artifacts"
-        params = []
+        """List stored artifacts, ordered by epoch_ns descending."""
+        query = "SELECT epoch_ns, exit_code, command, filename, length(content) as bytes, out_dir, timestamp_ns FROM test_artifacts"
+        params: list = []
         if out_dir:
             query += " WHERE out_dir = ?"
             params.append(out_dir)
-        query += " ORDER BY epoch DESC, filename"
-        
+        query += " ORDER BY epoch_ns DESC, filename"
+
         logger.debug(f"SQL: {query} with params {params}")
-        
+
         with sqlite3.connect(self.db_path) as con:
-            con.row_factory = sqlite3.Row
             rows = con.execute(query, params).fetchall()
-            return [dict(row) for row in rows]
+            return [
+                {
+                    'epoch_ns': row[0],
+                    'exit_code': row[1],
+                    'command': row[2],
+                    'filename': row[3],
+                    'bytes': row[4],
+                    'out_dir': row[5],
+                    'timestamp_ns': row[6],
+                }
+                for row in rows
+            ]
 
 
 class TertTestRunner:
@@ -372,40 +763,42 @@ def run_tests(
     *args,
 ) -> int:
     """Execute a test suite and record results in the replog."""
-    epoch = int(datetime.now().timestamp())
-    timestamp = datetime.now().isoformat()
-    out_dir_name = f"{epoch}-{datetime.now().strftime('%Y-%m-%dT%H-%M-%S%z')}"
+    ns = time.time_ns()
+    epoch_ns = ns
+    epoch_s = ns // 1_000_000_000
+    timestamp_ns = _format_timestamp_ns(ns)
+    out_dir_name = f"{epoch_s}-{datetime.fromtimestamp(epoch_s, tz=timezone.utc).strftime('%Y-%m-%dT%H-%M-%S+0000')}"
     out_dir = reports_dir / out_dir_name
-    
+
     test_runner = get_runner(runner, out_dir)
     exit_code = test_runner.run(*args)
-    
+
     latest_link = reports_dir / "latest"
     if latest_link.is_symlink():
         latest_link.unlink()
     latest_link.symlink_to(out_dir_name)
-    
+
     # Construct command string for logging
     if args:
         command = f"{runner} {' '.join(str(a) for a in args)}"
     else:
         command = runner
-    
+
     run = TertTestRun(
-        epoch=epoch,
+        timestamp_ns=timestamp_ns,
+        epoch_ns=epoch_ns,
         exit_code=exit_code,
-        timestamp=timestamp,
         out_dir=out_dir,
         command=command,
     )
     replog_db.insert_run(run)
-    
+
     if not skip_artifacts:
         for artifact_path in test_runner.get_artifacts():
             if artifact_path.exists():
                 content = artifact_path.read_text(errors="replace")
-                replog_db.insert_artifact(epoch, out_dir, artifact_path.name, content, command)
-    
+                replog_db.insert_artifact(epoch_ns, timestamp_ns, out_dir, artifact_path.name, content, command, exit_code)
+
     return exit_code
 
 

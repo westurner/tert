@@ -1,0 +1,275 @@
+/* tert replog datasette custom styles */
+
+/* All table cells: monospace */
+td, th {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    /*font-size: 0.85em;*/
+    font-size: 0.6em;
+}
+
+/* content column: pre-wrap so newlines/whitespace render correctly */
+td.col-content {
+    white-space: pre-wrap;
+    /* word-break: break-word;
+    max-width: 80ch; */
+}
+
+/* long path/command columns: allow wrapping */
+td.col-out_dir,
+td.col-full_path,
+td.col-command {
+    word-break: break-all;
+    /* max-width: 40ch; */
+}
+
+td.col-exit_code.type-int {
+  text-align: right;
+}
+
+td.col-exit_code, th.col-exit_code {
+  max-width: 3em;
+}
+th.col-exit_code {
+  font-size: 0.1em;
+}
+
+/* ------------------------------------------------------------------ */
+/* FTS search result highlighting (search-highlight.js)                */
+/* ------------------------------------------------------------------ */
+
+/* Base mark style — colors are injected dynamically per-term by JS   */
+mark.fts-hl {
+    color: inherit;
+    font-family: inherit;
+    font-size: inherit;
+    /* background-color set per data-idx in <style id="fts-hl-styles"> */
+}
+
+/* Compat: old single-class marks from v1 kept working                */
+mark.fts-highlight {
+    background-color: #fff176;
+    color: inherit;
+    border-radius: 2px;
+    padding: 0 1px;
+    font-family: inherit;
+    font-size: inherit;
+}
+body.fts-highlights-off mark.fts-highlight { background-color: transparent; }
+
+/* ── Highlight panel ─────────────────────────────────────────────── */
+.fts-highlight-panel {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 5px;
+    padding: 5px 2px 8px 2px;
+    font-size: 0.82rem;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+/* Term chip list */
+.fts-term-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    align-items: center;
+}
+
+.fts-term-row {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    background: #f5f5f5;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    padding: 2px 4px;
+}
+
+/* Add-term row */
+.fts-add-row {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+}
+
+.fts-add-input {
+    font-family: inherit;
+    font-size: 0.9em;
+    border: 1px solid #ccc;
+    border-radius: 3px;
+    padding: 2px 5px;
+    width: 9em;
+}
+.fts-add-input:focus { outline: 2px solid #7ac; }
+
+/* Shared button base */
+.fts-btn {
+    font-family: inherit;
+    font-size: 0.9em;
+    border: 1px solid #ccc;
+    border-radius: 3px;
+    cursor: pointer;
+    background: #f5f5f5;
+    padding: 1px 5px;
+    line-height: 1.4;
+    color: #333;
+}
+.fts-btn:hover { background: #e8e8e8; }
+
+/* Master toggle */
+.fts-toggle-all[aria-pressed="true"]  { background: #dff0d8; border-color: #5a9; color: #2a5; }
+.fts-toggle-all[aria-pressed="false"] { background: #f5f5f5; color: #888; }
+
+/* Per-term toggle */
+.fts-term-toggle[aria-pressed="true"]  { color: #333; }
+.fts-term-toggle[aria-pressed="false"] { color: #bbb; }
+
+/* Term label */
+.fts-term-label {
+    font-family: inherit;
+    padding: 0 2px;
+    user-select: text;
+}
+
+/* Remove button */
+.fts-term-remove       { color: #aaa; padding: 0 4px; font-weight: bold; }
+.fts-term-remove:hover { color: #c00; background: #fee; border-color: #f99; }
+
+/* Inline remove confirmation */
+.fts-term-row--confirming {
+    border-color: #e44;
+    background: #fff4f4;
+}
+.fts-term-remove-confirm {
+    color: #060;
+    font-weight: bold;
+    padding: 0 5px;
+    border-color: #090;
+}
+.fts-term-remove-confirm:hover { background: #dfd; border-color: #060; }
+.fts-term-remove-cancel {
+    color: #666;
+    padding: 0 5px;
+}
+.fts-term-remove-cancel:hover { background: #eee; }
+
+/* Color picker — native element, no deps */
+input.fts-color-picker {
+    width: 22px;
+    height: 20px;
+    border: 1px solid #ccc;
+    border-radius: 3px;
+    padding: 0;
+    cursor: pointer;
+    vertical-align: middle;
+    background: none;
+}
+
+/* Add button */
+.fts-add-btn { font-weight: bold; padding: 1px 7px; }
+
+/* Page-scope informational note */
+p.fts-panel-note {
+    margin: 4px 0 0 0;
+    font-size: 0.78em;
+    color: #888;
+    font-style: italic;
+    line-height: 1.3;
+}
+
+/* ── Inline term-label editor ───────────────────────────────────── */
+span.fts-term-label {
+    cursor: text;
+    text-decoration: underline dotted #aaa;
+    text-underline-offset: 2px;
+}
+span.fts-term-label:hover {
+    text-decoration-color: #59c;
+    color: #224;
+}
+
+input.fts-term-edit-input {
+    font-family: inherit;
+    font-size: inherit;
+    border: 1px solid #7ac;
+    border-radius: 3px;
+    padding: 0 3px;
+    background: #fff;
+    min-width: 4em;
+    max-width: 20em;
+    width: auto;
+}
+input.fts-term-edit-input:focus {
+    outline: 2px solid #59c;
+    outline-offset: 1px;
+}
+mark.fts-hl.fts-current {
+    outline: 2px solid rgba(0, 0, 0, 0.55);
+    outline-offset: 1px;
+    filter: brightness(0.72);
+}
+
+/* ── Navigation bar ─────────────────────────────────────────────────── */
+.fts-nav-bar {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    background: #f0f0f0;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    padding: 2px 5px;
+}
+
+.fts-nav-count {
+    font-variant-numeric: tabular-nums;
+    min-width: 4.5em;
+    text-align: center;
+    font-size: 0.88em;
+    color: #555;
+}
+
+.fts-nav-btn {
+    padding: 1px 5px;
+    font-size: 0.8em;
+}
+
+.fts-nav-exit {
+    color: #999;
+    font-weight: bold;
+    padding: 0 5px;
+}
+.fts-nav-exit:hover { color: #c00; background: #fee; border-color: #f99; }
+
+.fts-nav-bar--confirming {
+    border-color: #e44;
+    background: #fff4f4;
+}
+
+/* ── Per-term case / regex toggles ──────────────────────────────────── */
+.fts-term-case,
+.fts-term-regex {
+    font-size: 0.78em;
+    padding: 1px 4px;
+    color: #888;
+    border-color: #ddd;
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+}
+
+.fts-term-case[aria-pressed="true"],
+.fts-term-regex[aria-pressed="true"] {
+    color: #222;
+    background: #e0e8ff;
+    border-color: #7a9;
+    font-weight: 600;
+}
+
+/* ── Invalid regex error indicator ──────────────────────────────────── */
+.fts-term-row--error {
+    border-color: #e44;
+    background: #fff0f0;
+}
+
+.fts-term-row--error .fts-term-label::after {
+    content: ' ⚠';
+    color: #c44;
+}

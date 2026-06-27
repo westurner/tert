@@ -7,7 +7,7 @@ use std::env;
 use std::process;
 use std::path::PathBuf;
 use tert::run_tests::{
-    TestRun, ReplogDB, get_runner, get_epoch, get_timestamp,
+    TestRun, ReplogDB, get_runner, get_epoch, get_epoch_ns, get_timestamp_ns,
     create_reports_dir, create_latest_symlink
 };
 
@@ -126,12 +126,12 @@ fn cmd_run(args: &[&str]) {
     };
     
     // Store results in database
-    let epoch = get_epoch();
-    let timestamp = get_timestamp();
+    let epoch_ns = get_epoch_ns();
+    let timestamp_ns = get_timestamp_ns();
     let test_run = TestRun {
-        epoch,
+        timestamp_ns: timestamp_ns.clone(),
+        epoch_ns,
         exit_code,
-        timestamp,
         out_dir: out_dir.clone(),
         command,
     };
@@ -179,9 +179,10 @@ fn cmd_query(args: &[&str]) {
                             println!("Test Runs:");
                             println!("{:-<80}", "");
                             for run in runs {
-                                println!("Epoch: {}", run.epoch);
-                                println!("  Timestamp: {}", run.timestamp);
+                                println!(" Timestamp: {}", run.timestamp_ns);
+                                println!("  Epoch ns: {}", run.epoch_ns);
                                 println!("  Exit Code: {}", run.exit_code);
+                                println!("  Command: {}", run.command);
                                 println!("  Output Dir: {}", run.out_dir.display());
                                 println!();
                             }
@@ -197,8 +198,10 @@ fn cmd_query(args: &[&str]) {
                         Ok(artifacts) => {
                             println!("Test Artifacts:");
                             println!("{:-<80}", "");
-                            for (epoch, out_dir, filename, _content, command, full_path) in artifacts {
-                                println!("Epoch: {}", epoch);
+                            for (epoch_ns, command, exit_code, filename, _content, out_dir, timestamp_ns, full_path) in artifacts {
+                                println!(" Timestamp: {}", timestamp_ns);
+                                println!("  Epoch ns:  {}", epoch_ns);
+                                println!("  Exit Code: {}", exit_code);
                                 println!("  File: {}", filename);
                                 println!("  Out Dir: {}", out_dir.display());
                                 println!("  Full Path: {}", full_path);
@@ -247,7 +250,7 @@ fn cmd_list(args: &[&str]) {
                     println!("{:-<80}", "");
                     for (i, run) in runs.iter().take(limit).enumerate() {
                         println!("{}. [{}] {} (exit: {})", 
-                            i + 1, run.epoch, run.timestamp, run.exit_code);
+                            i + 1, run.epoch_ns, run.timestamp_ns, run.exit_code);
                         println!("   {}", run.out_dir.display());
                     }
                     if runs.len() > limit {
@@ -280,13 +283,13 @@ fn cmd_show(args: &[&str]) {
         Ok(db) => {
             match db.query_runs() {
                 Ok(runs) => {
-                    // Try to parse as epoch first, then as path
-                    let epoch: Option<u64> = query_str.parse().ok();
+                    // Try to parse as epoch_ns first, then as path
+                    let epoch_ns: Option<u64> = query_str.parse().ok();
                     
                     let matching_runs: Vec<_> = runs.iter()
                         .filter(|r| {
-                            if let Some(e) = epoch {
-                                r.epoch == e
+                            if let Some(e) = epoch_ns {
+                                r.epoch_ns == e
                             } else {
                                 r.out_dir.to_string_lossy().contains(query_str)
                             }
@@ -301,8 +304,8 @@ fn cmd_show(args: &[&str]) {
                     for run in matching_runs {
                         println!("Test Run Details:");
                         println!("{:-<80}", "");
-                        println!("Epoch:     {}", run.epoch);
-                        println!("Timestamp: {}", run.timestamp);
+                        println!("Timestamp: {}", run.timestamp_ns);
+                        println!("Epoch ns:  {}", run.epoch_ns);
                         println!("Exit Code: {}", run.exit_code);
                         println!("Output Dir: {}", run.out_dir.display());
                         println!();
