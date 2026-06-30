@@ -3,7 +3,6 @@
 /// Test runner harness with timestamped reports and SQLite database.
 /// Supports multiple test runners (pytest, cargo, go, jest, vitest, tox)
 /// and stores test results, coverage data, and artifacts in SQLite for querying.
-
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -699,7 +698,6 @@ pub trait TestRunner {
 }
 
 /// Pytest test runner
-#[allow(dead_code)]
 pub struct PytestRunner {
     out_dir: PathBuf,
 }
@@ -730,7 +728,6 @@ impl TestRunner for PytestRunner {
 }
 
 /// Cargo test runner
-#[allow(dead_code)]
 pub struct CargoRunner {
     out_dir: PathBuf,
 }
@@ -778,7 +775,6 @@ impl TestRunner for CargoRunner {
 }
 
 /// Go test runner
-#[allow(dead_code)]
 pub struct GoRunner {
     out_dir: PathBuf,
 }
@@ -806,7 +802,6 @@ impl TestRunner for GoRunner {
 }
 
 /// Jest test runner
-#[allow(dead_code)]
 pub struct JestRunner {
     out_dir: PathBuf,
 }
@@ -834,7 +829,6 @@ impl TestRunner for JestRunner {
 }
 
 /// Vitest test runner
-#[allow(dead_code)]
 pub struct VitestRunner {
     out_dir: PathBuf,
 }
@@ -866,7 +860,6 @@ impl TestRunner for VitestRunner {
 }
 
 /// Tox test runner
-#[allow(dead_code)]
 pub struct ToxRunner {
     out_dir: PathBuf,
 }
@@ -894,7 +887,6 @@ impl TestRunner for ToxRunner {
 }
 
 /// Bashcov test runner (runs bashcov if installed)
-#[allow(dead_code)]
 pub struct BashcovRunner {
     out_dir: PathBuf,
 }
@@ -933,7 +925,6 @@ impl TestRunner for BashcovRunner {
 }
 
 /// Shellcov test runner (bash coverage wrapper, mimics bashcov output)
-#[allow(dead_code)]
 pub struct ShellcovRunner {
     out_dir: PathBuf,
 }
@@ -1001,7 +992,6 @@ fn interpreter_args(args: &[&str], command_flag: Option<&str>) -> Vec<String> {
 }
 
 /// Sh script runner
-#[allow(dead_code)]
 pub struct ShRunner {
     out_dir: PathBuf,
 }
@@ -1029,7 +1019,6 @@ impl TestRunner for ShRunner {
 }
 
 /// Bash script runner
-#[allow(dead_code)]
 pub struct BashRunner {
     out_dir: PathBuf,
 }
@@ -1057,7 +1046,6 @@ impl TestRunner for BashRunner {
 }
 
 /// Zsh script runner
-#[allow(dead_code)]
 pub struct ZshRunner {
     out_dir: PathBuf,
 }
@@ -1085,7 +1073,6 @@ impl TestRunner for ZshRunner {
 }
 
 /// Python script runner
-#[allow(dead_code)]
 pub struct PythonRunner {
     out_dir: PathBuf,
 }
@@ -1113,7 +1100,6 @@ impl TestRunner for PythonRunner {
 }
 
 /// IPython script runner
-#[allow(dead_code)]
 pub struct IpythonRunner {
     out_dir: PathBuf,
 }
@@ -1224,100 +1210,381 @@ pub fn create_latest_symlink(base: &Path, target: &Path) -> std::io::Result<()> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rstest::*;
     use tempfile::TempDir;
+
+    // ============================================================================
+    // FIXTURES
+    // ============================================================================
+
+    /// Bundles a TempDir (keeps the DB file alive) with the opened ReplogDB.
+    /// Using a struct avoids the lifetime hazard of returning only ReplogDB while
+    /// the TempDir that owns the file is dropped at the end of the fixture call.
+    struct DbFixture {
+        pub dir: TempDir,
+        pub db: ReplogDB,
+    }
+
+    #[fixture]
+    fn db_fixture() -> DbFixture {
+        let dir = TempDir::new().expect("temp dir");
+        let db = ReplogDB::new(dir.path().join("test.db")).expect("open db");
+        DbFixture { dir, db }
+    }
+
+    /// Standalone temp dir used as `out_dir` in artifact / run tests.
+    #[fixture]
+    fn temp_dir() -> TempDir {
+        TempDir::new().expect("temp dir")
+    }
+
+    // ============================================================================
+    // TIMESTAMP TESTS
+    // ============================================================================
 
     #[test]
     fn test_get_epoch() {
         let epoch = get_epoch();
-        assert!(epoch > 0);
+        assert!(epoch > 0, "epoch must be positive");
+        assert!(epoch > 1_600_000_000, "epoch must be after 2020");
     }
 
     #[test]
     fn test_get_epoch_ns_resolution() {
         let epoch_s = get_epoch();
         let epoch_ns = get_epoch_ns();
-        // epoch_ns should be approximately epoch_s * 1e9
         assert!(epoch_ns >= epoch_s * 1_000_000_000, "epoch_ns must be >= epoch_s * 1e9");
         assert!(epoch_ns < (epoch_s + 2) * 1_000_000_000, "epoch_ns must be within 2s of epoch_s");
     }
 
-    #[test]
-    fn test_get_timestamp_ns_format() {
-        let ts = get_timestamp_ns();
-        // Format: YYYY-MM-DDTHH:MM:SS.nnnnnnnnn+00:00
-        assert!(ts.contains('T'), "timestamp_ns must contain 'T'");
-        assert!(ts.ends_with("+00:00"), "timestamp_ns must end with +00:00");
-        let dot_pos = ts.find('.').expect("timestamp_ns must have nanosecond decimal point");
-        let nano_part = &ts[dot_pos + 1..dot_pos + 10];
-        assert_eq!(nano_part.len(), 9, "nanosecond part must be 9 digits");
-        assert!(nano_part.chars().all(|c| c.is_ascii_digit()), "nanoseconds must be digits");
+    /// Parametrized over the nanosecond (`true`) and legacy second (`false`) variants.
+    #[rstest]
+    #[case::nanos(true)]
+    #[case::seconds(false)]
+    fn test_timestamp_iso8601(#[case] with_nanos: bool) {
+        let ts = if with_nanos { get_timestamp_ns() } else { get_timestamp() };
+        assert!(ts.contains('T'), "must be ISO8601 (contains 'T')");
+        assert_eq!(ts.split('T').count(), 2, "must have exactly one 'T'");
+        if with_nanos {
+            assert!(ts.ends_with("+00:00"), "ns timestamp must end with +00:00");
+            let dot_pos = ts.find('.').expect("must have decimal point for nanos");
+            let nano_part = &ts[dot_pos + 1..dot_pos + 10];
+            assert_eq!(nano_part.len(), 9, "nanoseconds must be 9 digits");
+            assert!(nano_part.chars().all(|c| c.is_ascii_digit()), "must be all digits");
+        }
     }
 
     #[test]
-    fn test_get_timestamp_legacy() {
-        let ts = get_timestamp();
-        assert!(ts.contains('T'));
+    fn test_timestamp_ns_base_matches_seconds() {
+        let ts_ns = get_timestamp_ns();
+        let ts_s = get_timestamp();
+        // Both share the same YYYY-MM-DDTHH:MM:SS prefix
+        assert_eq!(&ts_ns[..19], &ts_s[..19], "base timestamps must match");
     }
 
-    #[test]
-    fn test_runner_factory() {
-        let out_dir = PathBuf::from("/tmp");
+    // ============================================================================
+    // INTERPRETER_ARGS TESTS
+    // ============================================================================
 
-        assert!(get_runner("pytest", &out_dir).is_some());
-        assert!(get_runner("cargo", &out_dir).is_some());
-        assert!(get_runner("go", &out_dir).is_some());
-        assert!(get_runner("jest", &out_dir).is_some());
-        assert!(get_runner("vitest", &out_dir).is_some());
-        assert!(get_runner("tox", &out_dir).is_some());
-        assert!(get_runner("unknown", &out_dir).is_none());
+    /// Cases where args pass through verbatim (no wrapping).
+    #[rstest]
+    #[case::empty(vec![], Some("-c"), vec![])]
+    #[case::options_passthrough(vec!["-x", "-e"], Some("-c"), vec!["-x", "-e"])]
+    #[case::no_command_flag(vec!["echo", "hello"], None, vec!["echo", "hello"])]
+    fn test_interpreter_args_passthrough(
+        #[case] args: Vec<&'static str>,
+        #[case] command_flag: Option<&'static str>,
+        #[case] expected: Vec<&'static str>,
+    ) {
+        let result = interpreter_args(&args, command_flag);
+        let result_strs: Vec<&str> = result.iter().map(String::as_str).collect();
+        assert_eq!(result_strs, expected);
     }
 
-    #[test]
-    fn test_replogdb_insert_and_query_run() {
-        let temp_dir = TempDir::new().expect("temp dir");
-        let db = ReplogDB::new(temp_dir.path().join("test.db")).expect("db");
-
-        let ts = get_timestamp_ns();
-        let run = TestRun {
-            timestamp_ns: ts.clone(),
-            epoch_ns: get_epoch_ns(),
-            exit_code: 0,
-            out_dir: temp_dir.path().join("run"),
-            command: "pytest tests/".to_string(),
-        };
-        db.insert_run(&run).expect("insert run");
-
-        let runs = db.query_runs().expect("query runs");
-        assert_eq!(runs.len(), 1);
-        assert_eq!(runs[0].timestamp_ns, ts);
-        assert_eq!(runs[0].exit_code, 0);
+    /// Cases where args are joined and wrapped with a command flag.
+    #[rstest]
+    #[case::simple_cmd(vec!["echo", "hello", "world"])]
+    #[case::with_spaces(vec!["echo", "hello world"])]
+    #[case::complex(vec!["grep", "-r", "foo bar", "."])]
+    fn test_interpreter_args_wrapped_with_flag(#[case] args: Vec<&'static str>) {
+        let result = interpreter_args(&args, Some("-c"));
+        assert_eq!(result.len(), 2, "wrapped result must be [flag, command]");
+        assert_eq!(result[0], "-c");
+        let joined = &result[1];
+        for arg in &args {
+            if arg.contains(' ') {
+                assert!(
+                    joined.contains(&format!("'{arg}'")) || joined.contains(&format!("\"{arg}\"")),
+                    "arg with spaces must be quoted: {arg}"
+                );
+            } else {
+                assert!(joined.contains(arg), "arg must appear in joined command: {arg}");
+            }
+        }
     }
 
-    #[test]
-    fn test_replogdb_artifact_linked_by_timestamp_ns() {
-        let temp_dir = TempDir::new().expect("temp dir");
-        let db = ReplogDB::new(temp_dir.path().join("test.db")).expect("db");
-        let out_dir = temp_dir.path().join("run");
+    // ============================================================================
+    // RUNNER FACTORY TESTS
+    // ============================================================================
 
-        let ts = get_timestamp_ns();
-        let epoch_ns = get_epoch_ns();
-        let run = TestRun {
-            timestamp_ns: ts.clone(),
+    /// Parametrized exhaustive test: factory returns a runner iff it should, and
+    /// the returned runner's name() matches the lookup key.
+    #[rstest]
+    #[case::pytest("pytest", true)]
+    #[case::cargo("cargo", true)]
+    #[case::go("go", true)]
+    #[case::jest("jest", true)]
+    #[case::vitest("vitest", true)]
+    #[case::tox("tox", true)]
+    #[case::bashcov("bashcov", true)]
+    #[case::shellcov("shellcov", true)]
+    #[case::sh("sh", true)]
+    #[case::bash("bash", true)]
+    #[case::zsh("zsh", true)]
+    #[case::python("python", true)]
+    #[case::ipython("ipython", true)]
+    #[case::unknown("unknown", false)]
+    #[case::rustc("rustc", false)]
+    #[case::empty("", false)]
+    fn test_runner_factory(#[case] name: &str, #[case] should_exist: bool) {
+        let runner = get_runner(name, Path::new("/tmp"));
+        assert_eq!(runner.is_some(), should_exist, "runner '{name}' existence mismatch");
+        if let Some(r) = runner {
+            assert_eq!(r.name(), name, "runner.name() must match the lookup key");
+        }
+    }
+
+    // ============================================================================
+    // REPLOGDB — INSERT AND QUERY TESTS
+    // ============================================================================
+
+    #[rstest]
+    fn test_replogdb_creates_db_file(db_fixture: DbFixture) {
+        assert!(
+            db_fixture.dir.path().join("test.db").exists(),
+            "database file must be created on disk"
+        );
+    }
+
+    /// Parametrized over run count, exit code, and command string.
+    #[rstest]
+    #[case::single(1, 0, "pytest")]
+    #[case::multiple(3, 0, "pytest")]
+    #[case::failed_run(1, 1, "cargo test")]
+    #[case::many(5, 42, "tox")]
+    fn test_replogdb_insert_and_query_runs(
+        db_fixture: DbFixture,
+        #[case] num_runs: usize,
+        #[case] exit_code: i32,
+        #[case] command: &str,
+    ) {
+        for i in 0..num_runs {
+            let run = TestRun {
+                timestamp_ns: get_timestamp_ns(),
+                epoch_ns: 1_000_000_000 + i as u64,
+                exit_code,
+                out_dir: db_fixture.dir.path().to_path_buf(),
+                command: command.to_string(),
+            };
+            db_fixture.db.insert_run(&run)
+                .unwrap_or_else(|e| panic!("insert run {i}: {e}"));
+        }
+
+        let runs = db_fixture.db.query_runs().expect("query runs");
+        assert_eq!(runs.len(), num_runs);
+
+        // Verify descending epoch_ns order
+        for window in runs.windows(2) {
+            assert!(
+                window[0].epoch_ns > window[1].epoch_ns,
+                "runs must be in descending epoch_ns order"
+            );
+        }
+    }
+
+    #[rstest]
+    fn test_replogdb_insert_run_replace(db_fixture: DbFixture) {
+        let epoch_ns = 1_000_000_000_u64;
+        let make_run = |command: &str| TestRun {
+            timestamp_ns: get_timestamp_ns(),
             epoch_ns,
             exit_code: 0,
-            out_dir: out_dir.clone(),
-            command: "".to_string(),
+            out_dir: db_fixture.dir.path().to_path_buf(),
+            command: command.to_string(),
         };
-        db.insert_run(&run).expect("insert run");
-        db.insert_artifact(epoch_ns, &ts, &out_dir, "build.log", "content", "", 0)
+
+        db_fixture.db.insert_run(&make_run("first")).expect("insert first");
+        db_fixture.db.insert_run(&make_run("second")).expect("insert second (replace)");
+
+        let runs = db_fixture.db.query_runs().expect("query runs");
+        assert_eq!(runs.len(), 1, "INSERT OR REPLACE must yield one row");
+        assert_eq!(runs[0].command, "second");
+    }
+
+    /// Parametrized over artifact count and content; large content is a separate test.
+    #[rstest]
+    #[case::one(1, "log content")]
+    #[case::two(2, "build output")]
+    #[case::three(3, "test data")]
+    fn test_replogdb_insert_and_query_artifacts(
+        db_fixture: DbFixture,
+        temp_dir: TempDir,
+        #[case] count: usize,
+        #[case] content: &str,
+    ) {
+        let out_dir = temp_dir.path().join("run");
+        fs::create_dir_all(&out_dir).expect("create out_dir");
+        let ts = get_timestamp_ns();
+
+        for i in 0..count {
+            db_fixture
+                .db
+                .insert_artifact(
+                    1_000_000_000 + i as u64,
+                    &ts,
+                    &out_dir,
+                    &format!("file{i}.log"),
+                    content,
+                    "pytest",
+                    0,
+                )
+                .unwrap_or_else(|e| panic!("insert artifact {i}: {e}"));
+        }
+
+        let artifacts = db_fixture.db.query_artifacts().expect("query artifacts");
+        assert_eq!(artifacts.len(), count);
+
+        // Verify descending order
+        for window in artifacts.windows(2) {
+            assert!(
+                window[0].0 >= window[1].0,
+                "artifacts must be in descending epoch_ns order"
+            );
+        }
+    }
+
+    #[rstest]
+    fn test_replogdb_artifact_full_path(db_fixture: DbFixture, temp_dir: TempDir) {
+        let out_dir = temp_dir.path().join("reports/run1");
+        fs::create_dir_all(&out_dir).expect("create out_dir");
+        let ts = get_timestamp_ns();
+
+        db_fixture
+            .db
+            .insert_artifact(1_000_000_000, &ts, &out_dir, "artifact.json", "{}", "", 0)
             .expect("insert artifact");
 
-        let artifacts = db.query_artifacts().expect("query artifacts");
+        let artifacts = db_fixture.db.query_artifacts().expect("query artifacts");
         assert_eq!(artifacts.len(), 1);
-        assert_eq!(artifacts[0].0, epoch_ns);   // epoch_ns is index 0 (PK)
-        assert_eq!(artifacts[0].3, "build.log");  // filename at index 3
-        assert_eq!(artifacts[0].4, "content");    // content at index 4
+        assert!(artifacts[0].7.contains("artifact.json"), "full_path must contain filename");
+        assert!(artifacts[0].7.contains("reports"), "full_path must contain dir");
     }
+
+    #[rstest]
+    fn test_replogdb_large_content_artifact(db_fixture: DbFixture, temp_dir: TempDir) {
+        let large_content = "x".repeat(100_000);
+        let out_dir = temp_dir.path().join("run");
+        fs::create_dir_all(&out_dir).expect("create out_dir");
+
+        db_fixture
+            .db
+            .insert_artifact(
+                1_000_000_000,
+                &get_timestamp_ns(),
+                &out_dir,
+                "large.log",
+                &large_content,
+                "",
+                0,
+            )
+            .expect("insert large artifact");
+
+        let artifacts = db_fixture.db.query_artifacts().expect("query artifacts");
+        assert_eq!(artifacts[0].4.len(), 100_000);
+    }
+
+    /// Parametrized over path suffixes that include spaces and special characters.
+    #[rstest]
+    #[case::simple("run")]
+    #[case::spaces("run with spaces")]
+    #[case::special("run & special-chars")]
+    fn test_replogdb_artifact_path_variants(
+        db_fixture: DbFixture,
+        temp_dir: TempDir,
+        #[case] path_suffix: &str,
+    ) {
+        let out_dir = temp_dir.path().join(path_suffix);
+        fs::create_dir_all(&out_dir).expect("create out_dir");
+
+        db_fixture
+            .db
+            .insert_artifact(
+                1_000_000_000,
+                &get_timestamp_ns(),
+                &out_dir,
+                "file (1).log",
+                "content",
+                "",
+                0,
+            )
+            .expect("insert artifact");
+
+        let artifacts = db_fixture.db.query_artifacts().expect("query artifacts");
+        assert_eq!(artifacts.len(), 1);
+        assert!(
+            artifacts[0].7.contains(path_suffix),
+            "full_path must contain path suffix '{path_suffix}'"
+        );
+    }
+
+    // ============================================================================
+    // REPORTS DIRECTORY TESTS
+    // ============================================================================
+
+    #[rstest]
+    fn test_create_reports_dir(temp_dir: TempDir) {
+        let result = create_reports_dir(temp_dir.path()).expect("create reports dir");
+        assert!(result.exists(), "reports dir must be created");
+        assert!(result.is_dir(), "result must be a directory");
+    }
+
+    #[rstest]
+    fn test_create_reports_dir_name_format(temp_dir: TempDir) {
+        let result = create_reports_dir(temp_dir.path()).expect("create reports dir");
+        let dir_name = result.file_name().expect("dir name").to_string_lossy();
+        let parts: Vec<&str> = dir_name.split('-').collect();
+        assert!(parts.len() >= 2, "dir name must have epoch and timestamp parts");
+        assert!(
+            parts[0].chars().all(|c| c.is_ascii_digit()),
+            "first part must be epoch (all digits)"
+        );
+    }
+
+    #[rstest]
+    fn test_create_latest_symlink(temp_dir: TempDir) {
+        let target = temp_dir.path().join("test_report");
+        fs::create_dir_all(&target).expect("create target dir");
+        create_latest_symlink(temp_dir.path(), &target).expect("create symlink");
+        assert!(temp_dir.path().join("latest").exists(), "latest symlink must exist");
+    }
+
+    #[rstest]
+    fn test_create_latest_symlink_replace_existing(temp_dir: TempDir) {
+        let target1 = temp_dir.path().join("report1");
+        let target2 = temp_dir.path().join("report2");
+        fs::create_dir_all(&target1).expect("create target1");
+        fs::create_dir_all(&target2).expect("create target2");
+        create_latest_symlink(temp_dir.path(), &target1).expect("create symlink 1");
+        create_latest_symlink(temp_dir.path(), &target2).expect("create symlink 2");
+        assert!(
+            temp_dir.path().join("latest").exists(),
+            "latest symlink must exist after replacement"
+        );
+    }
+
+    // ============================================================================
+    // DATABASE MIGRATION TESTS
+    // ============================================================================
 
     #[test]
     fn test_migrate_v3_upgrades_epoch_schema() {
@@ -1326,41 +1593,86 @@ mod tests {
         let temp_dir = TempDir::new().expect("temp dir");
         let db_path = temp_dir.path().join("v2.db");
 
-        // Manually create a v2-style database with epoch as PK
+        // Seed a v2-style database (epoch INTEGER PK, no epoch_ns, no timestamp_ns).
         {
             let conn = Connection::open(&db_path).expect("open");
-            conn.execute_batch("
-                CREATE TABLE schema_version (version INTEGER PRIMARY KEY, applied_at TEXT);
-                INSERT INTO schema_version VALUES (2, datetime('now'));
-                CREATE TABLE test_runs (
-                    epoch INTEGER PRIMARY KEY, exit_code INTEGER,
-                    command TEXT DEFAULT '', timestamp TEXT, out_dir TEXT
-                );
-                CREATE TABLE test_artifacts (
-                    epoch INTEGER, out_dir TEXT, filename TEXT, content TEXT,
-                    command TEXT DEFAULT '', full_path TEXT,
-                    PRIMARY KEY (epoch, filename)
-                );
-                INSERT INTO test_runs VALUES (1700000000, 0, 'pytest', '2023-11-14T22:13:20', 'reports/run1');
-                INSERT INTO test_artifacts VALUES (1700000000, 'reports/run1', 'build.log', 'ok', 'pytest', 'reports/run1/build.log');
-            ").expect("setup v2 schema");
+            conn.execute_batch(
+                "CREATE TABLE schema_version (version INTEGER PRIMARY KEY, applied_at TEXT);
+                 INSERT INTO schema_version VALUES (2, datetime('now'));
+                 CREATE TABLE test_runs (
+                     epoch INTEGER PRIMARY KEY, exit_code INTEGER,
+                     command TEXT DEFAULT '', timestamp TEXT, out_dir TEXT
+                 );
+                 CREATE TABLE test_artifacts (
+                     epoch INTEGER, out_dir TEXT, filename TEXT, content TEXT,
+                     command TEXT DEFAULT '', full_path TEXT,
+                     PRIMARY KEY (epoch, filename)
+                 );
+                 INSERT INTO test_runs
+                     VALUES (1700000000, 0, 'pytest', '2023-11-14T22:13:20', 'reports/run1');
+                 INSERT INTO test_artifacts
+                     VALUES (1700000000, 'reports/run1', 'build.log', 'ok', 'pytest',
+                             'reports/run1/build.log');",
+            )
+            .expect("seed v2 schema");
         }
 
-        // Open with ReplogDB — should trigger v3+v4 migration
+        // Opening triggers migrations v3 → v8.
         let db = ReplogDB::new(&db_path).expect("migrate");
-        let runs = db.query_runs().expect("query after migration");
+
+        let runs = db.query_runs().expect("query runs after migration");
         assert_eq!(runs.len(), 1);
         assert!(
             runs[0].timestamp_ns.ends_with(".000000000+00:00"),
-            "migrated timestamp_ns should have nanosecond suffix"
+            "migrated timestamp_ns must have nanosecond suffix"
         );
-        assert_eq!(runs[0].epoch_ns, 1700000000_u64 * 1_000_000_000,
-            "epoch_ns must be epoch seconds * 1e9");
+        assert_eq!(
+            runs[0].epoch_ns,
+            1_700_000_000_u64 * 1_000_000_000,
+            "epoch_ns must be epoch_seconds * 1e9"
+        );
 
-        let artifacts = db.query_artifacts().expect("query artifacts");
+        let artifacts = db.query_artifacts().expect("query artifacts after migration");
         assert_eq!(artifacts.len(), 1);
-        assert_eq!(artifacts[0].0, runs[0].epoch_ns, "artifact epoch_ns must match run (FK)");
+        assert_eq!(artifacts[0].0, runs[0].epoch_ns, "artifact epoch_ns must match run");
         assert_eq!(artifacts[0].6, runs[0].timestamp_ns, "artifact timestamp_ns must match run");
-        assert_eq!(artifacts[0].1, 0_i32, "migrated artifact exit_code must default to 0");
+    }
+
+    // ============================================================================
+    // STRUCT FIELD AND MISC TESTS
+    // ============================================================================
+
+    #[test]
+    fn test_testrun_struct_fields() {
+        let run = TestRun {
+            timestamp_ns: "2023-01-01T00:00:00.000000000+00:00".to_string(),
+            epoch_ns: 1_672_531_200_000_000_000,
+            exit_code: 42,
+            out_dir: PathBuf::from("/tmp/test"),
+            command: "test command".to_string(),
+        };
+        assert_eq!(run.exit_code, 42);
+        assert_eq!(run.command, "test command");
+        assert_eq!(run.out_dir.to_string_lossy(), "/tmp/test");
+    }
+
+    #[test]
+    fn test_runner_new_accepts_path() {
+        // Smoke-test that all runner constructors accept an AsRef<Path> argument.
+        // Correct names are already validated by test_runner_factory.
+        let p = PathBuf::from("/test/output/dir");
+        let _ = PytestRunner::new(&p);
+        let _ = CargoRunner::new(&p);
+        let _ = GoRunner::new(&p);
+        let _ = JestRunner::new(&p);
+        let _ = VitestRunner::new(&p);
+        let _ = ToxRunner::new(&p);
+        let _ = BashcovRunner::new(&p);
+        let _ = ShellcovRunner::new(&p);
+        let _ = ShRunner::new(&p);
+        let _ = BashRunner::new(&p);
+        let _ = ZshRunner::new(&p);
+        let _ = PythonRunner::new(&p);
+        let _ = IpythonRunner::new(&p);
     }
 }

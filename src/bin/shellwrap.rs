@@ -7,7 +7,6 @@
 /// - Color mode management (auto, always, never)
 /// - Interactive shell execution
 /// - Bash environment file injection
-
 use std::env;
 use std::fs::{self, File};
 use std::io::{self, BufRead, BufReader, Write};
