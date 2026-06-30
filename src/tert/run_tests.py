@@ -822,6 +822,90 @@ class IpythonRunner(TertTestRunner):
         return self.shellwrap.execute_streaming()
 
 
+class FetchRunner(TertTestRunner):
+    """Runs ``tert fetch`` in-process as a logged "run".
+
+    Unlike the shell runners, fetch is not a generic subprocess: it produces a
+    concrete downloaded file (and signed metadata). This runner downloads into
+    the report directory, captures fetch's log into ``build.log``, and exposes
+    the downloaded file plus its metadata via :meth:`get_artifacts`, so the
+    standard replog + artifact-summary machinery registers the output path.
+    """
+
+    def __init__(self, out_dir: Path):
+        super().__init__(out_dir)
+        self._produced: List[Path] = []
+
+    def run(self, *args) -> int:
+        from .fetch import (
+            build_parser as _fetch_build_parser,
+            basename_from_url as _basename_from_url,
+            fetch as _fetch,
+            main as _fetch_main,
+            logger as _fetch_logger,
+            FetchError as _FetchError,
+        )
+
+        argv = list(args)
+        parser = _fetch_build_parser()
+        try:
+            ns = parser.parse_args(argv)
+        except SystemExit as exc:
+            return int(exc.code or 2)
+
+        # Non-download actions (crypto-only / query / verify) have no artifact;
+        # delegate to the standalone CLI.
+        if ns.crypto_only or ns.query or ns.verify_file:
+            return _fetch_main(argv)
+
+        if not ns.url:
+            self.build_log.write_text("fetch: a URL is required\n")
+            return 2
+
+        # Default the destination into the report dir unless caching centrally.
+        dest = ns.dest
+        if dest is None and not ns.cache:
+            dest = str(self.out_dir / _basename_from_url(ns.url))
+
+        handler = logging.FileHandler(self.build_log)
+        handler.setFormatter(logging.Formatter("[%(levelname)s] %(message)s"))
+        _fetch_logger.addHandler(handler)
+        prev_level = _fetch_logger.level
+        _fetch_logger.setLevel(logging.DEBUG if ns.verbose else logging.INFO)
+        try:
+            result = _fetch(
+                ns.url,
+                dest,
+                strategy=ns.strategy or "auto",
+                verify=not ns.no_verify_crypto,
+                overwrite=ns.overwrite,
+                sign=ns.sign,
+                keys_dir=ns.keys_dir,
+                cryptosuite=ns.cryptosuite,
+                cache=ns.cache,
+                cache_dir=ns.cache_dir,
+                log=_fetch_logger,
+            )
+        except (_FetchError, NotImplementedError) as exc:
+            _fetch_logger.error("%s", exc)
+            return 1
+        finally:
+            _fetch_logger.removeHandler(handler)
+            handler.close()
+            _fetch_logger.setLevel(prev_level)
+
+        if result.dest:
+            self._produced.append(Path(result.dest))
+        if result.provenance_path:
+            self._produced.append(Path(result.provenance_path))
+        return result.exit_code
+
+    def get_artifacts(self) -> List[Path]:
+        arts = [p for p in self.artifacts if p.exists()]
+        arts.extend(p for p in self._produced if p.exists() and p not in arts)
+        return arts
+
+
 def get_runner(runner_name: str, out_dir: Path) -> TertTestRunner:
     """Instantiate the appropriate runner."""
     runners = {
@@ -838,6 +922,7 @@ def get_runner(runner_name: str, out_dir: Path) -> TertTestRunner:
         "zsh": ZshRunner,
         "python": PythonRunner,
         "ipython": IpythonRunner,
+        "fetch": FetchRunner,
     }
     runner_class = runners.get(runner_name)
     if not runner_class:
@@ -851,6 +936,11 @@ def run_tests(
     replog_db: ReplogDB,
     skip_artifacts: bool = False,
     *args,
+    inputs: Optional[List[str]] = None,
+    input_checksums: Optional[List[str]] = None,
+    summary_sign: bool = False,
+    keys_dir: Optional[str] = None,
+    cryptosuite: str = "eddsa-jcs-2022",
 ) -> int:
     """Execute a test suite and record results in the replog."""
     ns = time.time_ns()
@@ -859,6 +949,27 @@ def run_tests(
     timestamp_ns = _format_timestamp_ns(ns)
     out_dir_name = f"{epoch_s}-{datetime.fromtimestamp(epoch_s, tz=timezone.utc).strftime('%Y-%m-%dT%H-%M-%S+0000')}"
     out_dir = reports_dir / out_dir_name
+    summaries_dir = out_dir / "artifacts"
+
+    from . import artifacts as _artifacts
+    from .vc import resolve_key_backend
+
+    backend = None
+    if summary_sign:
+        backend = resolve_key_backend(keys_dir=keys_dir, log=logger)
+
+    # Input artifact summaries are generated, printed and stored *before* the run.
+    inputs = inputs or []
+    input_checksums = input_checksums or []
+    for i, input_path in enumerate(inputs):
+        checksum = input_checksums[i] if i < len(input_checksums) else None
+        summary = _artifacts.build_artifact_summary(input_path, role="input", checksum=checksum)
+        if summary["credentialSubject"].get("checksum_verified") is False:
+            logger.error("input checksum mismatch for %s", input_path)
+            return 3
+        summary = _artifacts.maybe_sign(summary, backend, cryptosuite)
+        _artifacts.write_summary(summary, str(summaries_dir))
+        print(_artifacts.summary_text(summary, "yaml"))
 
     test_runner = get_runner(runner, out_dir)
     exit_code = test_runner.run(*args)
@@ -888,8 +999,85 @@ def run_tests(
             if artifact_path.exists():
                 content = artifact_path.read_text(errors="replace")
                 replog_db.insert_artifact(epoch_ns, timestamp_ns, out_dir, artifact_path.name, content, command, exit_code)
+                # Output artifact summary (YAML-LD/PROV), printed and stored.
+                summary = _artifacts.build_artifact_summary(str(artifact_path), role="output")
+                summary = _artifacts.maybe_sign(summary, backend, cryptosuite)
+                _artifacts.write_summary(summary, str(summaries_dir))
+                print(_artifacts.summary_text(summary, "yaml"))
 
     return exit_code
+
+
+def record_run(
+    reports_dir: Path,
+    replog_db: ReplogDB,
+    command: str,
+    exit_code: int,
+    artifact_paths: List,
+    *,
+    summary_sign: bool = False,
+    keys_dir: Optional[str] = None,
+    cryptosuite: str = "eddsa-jcs-2022",
+) -> Path:
+    """Record an already-completed action (e.g. a fetch) in the replog.
+
+    Creates a timestamped report directory, writes a ``build.log`` summary,
+    updates the ``latest`` symlink, inserts a run row, and registers each given
+    artifact path (plus the build log) with a YAML-LD output artifact summary.
+    Returns the report directory.
+    """
+    from . import artifacts as _artifacts
+    from .vc import resolve_key_backend
+
+    ns = time.time_ns()
+    epoch_ns = ns
+    epoch_s = ns // 1_000_000_000
+    timestamp_ns = _format_timestamp_ns(ns)
+    out_dir_name = f"{epoch_s}-{datetime.fromtimestamp(epoch_s, tz=timezone.utc).strftime('%Y-%m-%dT%H-%M-%S+0000')}"
+    out_dir = reports_dir / out_dir_name
+    out_dir.mkdir(parents=True, exist_ok=True)
+    summaries_dir = out_dir / "artifacts"
+
+    paths = [Path(p) for p in artifact_paths]
+
+    build_log = out_dir / "build.log"
+    log_lines = [f"$ {command}", f"exit_code={exit_code}"]
+    log_lines.extend(f"artifact: {p}" for p in paths)
+    build_log.write_text("\n".join(log_lines) + "\n")
+
+    latest_link = reports_dir / "latest"
+    if latest_link.is_symlink():
+        latest_link.unlink()
+    try:
+        latest_link.symlink_to(out_dir_name)
+    except OSError:
+        pass
+
+    replog_db.insert_run(TertTestRun(
+        timestamp_ns=timestamp_ns,
+        epoch_ns=epoch_ns,
+        exit_code=exit_code,
+        out_dir=out_dir,
+        command=command,
+    ))
+
+    backend = resolve_key_backend(keys_dir=keys_dir, log=logger) if summary_sign else None
+
+    for artifact_path in [build_log] + paths:
+        if not artifact_path.exists():
+            continue
+        try:
+            content = artifact_path.read_text(errors="replace")
+        except OSError:
+            content = ""
+        replog_db.insert_artifact(
+            epoch_ns, timestamp_ns, out_dir, artifact_path.name, content, command, exit_code
+        )
+        summary = _artifacts.build_artifact_summary(str(artifact_path), role="output")
+        summary = _artifacts.maybe_sign(summary, backend, cryptosuite)
+        _artifacts.write_summary(summary, str(summaries_dir))
+
+    return out_dir
 
 
 def query_runs(replog_db: ReplogDB) -> List[Dict]:
@@ -946,8 +1134,19 @@ def main():
         from .fetch import main as fetch_main
         return fetch_main(sys.argv[2:])
 
-    known_runners = ["pytest", "cargo", "go", "jest", "vitest", "tox", "sh", "bash", "zsh", "python", "ipython"]
-    known_commands = ["run", "ls", "show", "query", "fetch"]
+    # The ``did-agent`` subcommand (ssh-agent-style Ed25519 signer) likewise has
+    # its own parser.
+    if sys.argv[1:2] == ["did-agent"]:
+        from .did_agent import main as did_agent_main
+        return did_agent_main(sys.argv[2:])
+
+    # The ``vc`` subcommand signs/verifies Verifiable Credential documents.
+    if sys.argv[1:2] == ["vc"]:
+        from .vc import main as vc_main
+        return vc_main(sys.argv[2:])
+
+    known_runners = ["pytest", "cargo", "go", "jest", "vitest", "tox", "sh", "bash", "zsh", "python", "ipython", "fetch"]
+    known_commands = ["run", "ls", "show", "query", "fetch", "did-agent", "vc"]
     command_aliases = {"q": "query", "l": "ls", "s": "show"}
     subquery_aliases = {"l": "lines", "a": "artifacts", "r": "runs", "lines": "coverage-lines"}
     subquery_normalized = {"coverage-lines": "coverage-lines", "lines": "coverage-lines"}
@@ -988,10 +1187,19 @@ def main():
     subparsers = parser.add_subparsers(dest="command")
     
     run_parser = subparsers.add_parser("run", help="Run tests")
-    run_parser.add_argument("--runner", default="pytest", choices=["pytest", "cargo", "go", "jest", "vitest", "tox", "sh", "bash", "zsh", "python", "ipython"], help="Test runner to use")
+    run_parser.add_argument("--runner", default="pytest", choices=["pytest", "cargo", "go", "jest", "vitest", "tox", "sh", "bash", "zsh", "python", "ipython", "fetch"], help="Test runner to use")
     run_parser.add_argument("--reports-dir", type=Path, default=Path("reports"), help="Reports directory")
     run_parser.add_argument("--replog-db", type=Path, default=Path("reports/replog.db"), help="Replog SQLite database path")
     run_parser.add_argument("--no-artifacts", action="store_true", help="Skip storing artifacts")
+    run_parser.add_argument("--input", action="append", default=[], dest="inputs",
+                            metavar="FILE", help="Input artifact file (repeatable)")
+    run_parser.add_argument("--input-checksum", action="append", default=[], dest="input_checksums",
+                            metavar="sha256:HEX", help="Expected checksum for the matching --input")
+    run_parser.add_argument("--summary-sign", action="store_true",
+                            help="DID-sign artifact summaries")
+    run_parser.add_argument("--keys-dir", help="On-disk key directory for signing summaries")
+    run_parser.add_argument("--cryptosuite", default="eddsa-jcs-2022",
+                            help="Cryptosuite for signed summaries (default: eddsa-jcs-2022)")
     run_parser.add_argument("runner_args", nargs="*", help="Arguments to pass to the test runner or path to tests")
     
     ls_parser = subparsers.add_parser("ls", help="List reports")
@@ -1001,7 +1209,7 @@ def main():
     show_parser.add_argument("reportdir", nargs="?", default="reports/latest", help="Report directory")
     
     query_parser = subparsers.add_parser("query", help="Query replog")
-    query_parser.add_argument("subquery", choices=["runs", "r", "artifacts", "a", "coverage-lines", "lines", "l"], help="Query type")
+    query_parser.add_argument("subquery", choices=["runs", "r", "artifacts", "a", "coverage-lines", "lines", "l", "artifact-summaries", "summaries"], help="Query type")
     query_parser.add_argument("--replog-db", type=Path, default=Path("reports/replog.db"), help="Replog SQLite database path")
     query_parser.add_argument("--jsonl", "--nl", action="store_true", help="Output as JSON Lines")
     query_parser.add_argument("query_args", nargs="*", help="Query arguments")
@@ -1023,7 +1231,14 @@ def main():
             runner_args = runner_args[1:]
         
         replog_db = ReplogDB(args.replog_db)
-        exit_code = run_tests(runner, args.reports_dir, replog_db, args.no_artifacts, *runner_args)
+        exit_code = run_tests(
+            runner, args.reports_dir, replog_db, args.no_artifacts, *runner_args,
+            inputs=args.inputs,
+            input_checksums=args.input_checksums,
+            summary_sign=args.summary_sign,
+            keys_dir=args.keys_dir,
+            cryptosuite=args.cryptosuite,
+        )
         return exit_code
     
     elif args.command == "ls":
@@ -1039,7 +1254,7 @@ def main():
     elif args.command == "query":
         replog_db = ReplogDB(args.replog_db)
         
-        subquery_map = {"r": "runs", "a": "artifacts", "l": "coverage-lines", "lines": "coverage-lines"}
+        subquery_map = {"r": "runs", "a": "artifacts", "l": "coverage-lines", "lines": "coverage-lines", "summaries": "artifact-summaries"}
         subquery = subquery_map.get(args.subquery, args.subquery)
         
         if subquery == "runs":
@@ -1071,6 +1286,22 @@ def main():
                     print(json.dumps({"file": file_path, "lines": line_nums}))
             else:
                 print(json.dumps(lines, indent=2))
+
+        elif subquery == "artifact-summaries":
+            from . import artifacts as _artifacts
+            reportdir = Path(args.query_args[0] if args.query_args else "reports/latest")
+            summaries_dir = reportdir / "artifacts"
+            rows = []
+            for path, doc in _artifacts.iter_summaries(str(summaries_dir)):
+                subject = dict(doc.get("credentialSubject", {}))
+                subject["_summary_path"] = path
+                subject["_signed"] = "proof" in doc
+                rows.append(subject)
+            if args.jsonl:
+                for row in rows:
+                    print(json.dumps(row))
+            else:
+                print(json.dumps(rows, indent=2))
     
     return 0
 

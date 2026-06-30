@@ -1,0 +1,6 @@
+[verifiableCredential]
+"@context" = ["https://www.w3.org/ns/credentials/v2"]
+credentialSubject = {count = 3, id = "urn:example:1", name = "Ada", unicode = "café ☃"}
+type = ["VerifiableCredential"]
+issuer = "did:key:z6MkneMkZqwqRiU5mJzSG3kDwzt9P8C59N4NGTfBLfSGE7c7"
+proof = {type = "DataIntegrityProof", cryptosuite = "eddsa-jcs-2022", created = "2026-01-02T03:04:05Z", proofPurpose = "assertionMethod", verificationMethod = "did:key:z6MkneMkZqwqRiU5mJzSG3kDwzt9P8C59N4NGTfBLfSGE7c7#z6MkneMkZqwqRiU5mJzSG3kDwzt9P8C59N4NGTfBLfSGE7c7", proofValue = "2F4THGLKUC4pXPMymr7NPtdjqUm5rjAoZzmQ7mu1PoZpInSeZzVahm+8j89Klp7Wxtnz6ePxClEsgK8Aa3I2Cw=="}

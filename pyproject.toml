@@ -39,6 +39,8 @@ dev = [
 tert = "tert.run_tests:main"
 tert-shellwrap = "tert.shellwrap:main"
 tert-fetch = "tert.fetch:main"
+tert-did-agent = "tert.did_agent:main"
+tert-vc = "tert.vc:main"
 
 [tool.maturin]
 python-source = "src"

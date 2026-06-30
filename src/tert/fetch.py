@@ -32,8 +32,9 @@ import shutil
 import hashlib
 import logging
 import argparse
+import re
 import subprocess
-from pathlib import Path
+from datetime import datetime, timezone
 from dataclasses import dataclass, field, asdict
 from typing import Optional, List, Dict, Any, Sequence, Mapping
 
@@ -177,6 +178,38 @@ def detect_tls_backend(version_text: Optional[str]) -> Optional[str]:
     return None
 
 
+# curl -v prints e.g. "* SSL connection using TLSv1.3 / TLS_AES_256_GCM_SHA384".
+_TLS_CONN_RE = re.compile(r"SSL connection using (\S+)\s*/\s*([A-Za-z0-9_\-]+)")
+# Fallbacks for other downloaders / formats.
+_TLS_VERSION_RE = re.compile(r"\b(TLSv1\.[0-3]|TLSv1|TLS1\.[0-3]|SSLv3)\b")
+_TLS_CIPHER_RE = re.compile(
+    r"(?:cipher|Cipher|ciphersuite)[\s:=]+[\"']?([A-Za-z0-9_]+(?:[-_][A-Za-z0-9]+)*)"
+)
+
+
+def parse_tls_info(text: Optional[str]) -> "tuple[Optional[str], Optional[str]]":
+    """Extract ``(tls_version, tls_cipher)`` from downloader verbose output.
+
+    Recognises curl's ``SSL connection using <version> / <cipher>`` line and
+    falls back to generic TLS-version / cipher patterns (e.g. wget/GnuTLS debug
+    output). Returns ``(None, None)`` for non-TLS transfers such as ``file://``.
+    """
+    if not text:
+        return None, None
+    match = _TLS_CONN_RE.search(text)
+    if match:
+        return match.group(1), match.group(2)
+    version = None
+    cipher = None
+    version_match = _TLS_VERSION_RE.search(text)
+    if version_match:
+        version = version_match.group(1)
+    cipher_match = _TLS_CIPHER_RE.search(text)
+    if cipher_match:
+        cipher = cipher_match.group(1)
+    return version, cipher
+
+
 def verify_crypto_config(cfg: CryptoConfig) -> "tuple[bool, List[str]]":
     """Verify a crypto configuration.
 
@@ -242,11 +275,195 @@ class FetchResult:
     exit_code: int = 0
     sha256: Optional[str] = None
     bytes_written: Optional[int] = None
+    provenance_path: Optional[str] = None
+    signed_by: Optional[str] = None
+    tls_version: Optional[str] = None
+    tls_cipher: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         d = asdict(self)
         d["crypto_config"] = self.crypto_config.to_dict()
         return d
+
+
+# ---------------------------------------------------------------------------
+# Key backends and DID-signed provenance
+# ---------------------------------------------------------------------------
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+# Key backends and document signing live in ``tert.vc``; re-exported here for
+# backwards compatibility with existing imports from ``tert.fetch``.
+from .vc import (  # noqa: E402
+    KeyBackend,
+    AgentKeyBackend,
+    FileKeyBackend,
+    resolve_key_backend,
+    sign_document,
+    verify_document,
+    DEFAULT_CRYPTOSUITE,
+)
+
+
+def build_provenance(result: FetchResult) -> Dict[str, Any]:
+    """Build an unsigned YAML-LD/JSON provenance document for a fetch result."""
+    cfg = result.crypto_config
+    return {
+        "@context": [
+            "https://www.w3.org/ns/credentials/v2",
+            "https://www.w3.org/ns/prov",
+        ],
+        "type": ["VerifiableCredential", "prov:Entity"],
+        "issuanceDate": _utc_now_iso(),
+        "credentialSubject": {
+            "type": "prov:Entity",
+            "url": result.url,
+            "dest": result.dest,
+            "sha256": result.sha256,
+            "bytes": result.bytes_written,
+            "strategy": result.strategy,
+            "tls_backend": cfg.tls_backend,
+            "tls_version": result.tls_version,
+            "tls_cipher": result.tls_cipher,
+            "ca_bundle_path": cfg.ca_bundle_path,
+            "ca_bundle_sha256": cfg.ca_bundle_sha256,
+            "ca_bundle_cert_count": cfg.ca_bundle_cert_count,
+        },
+    }
+
+
+def sign_provenance(
+    prov: Dict[str, Any],
+    backend: KeyBackend,
+    cryptosuite: str = DEFAULT_CRYPTOSUITE,
+) -> Dict[str, Any]:
+    """Return a copy of *prov* with a DID DataIntegrityProof."""
+    return sign_document(prov, backend, cryptosuite=cryptosuite)
+
+
+def verify_provenance(prov: Dict[str, Any]) -> bool:
+    """Verify the DID proof on a provenance document."""
+    return verify_document(prov)
+
+
+def verify_provenance_file(path: str) -> bool:
+    """Load a provenance sidecar JSON file and verify its DID proof."""
+    with open(path, "r", encoding="utf-8") as fh:
+        return verify_provenance(json.load(fh))
+
+
+def provenance_sidecar_path(dest: str) -> str:
+    return dest + ".prov.json"
+
+
+# ---------------------------------------------------------------------------
+# Central cache + signed YAML-LD metadata + index (modeled on scripts/fetchc)
+# ---------------------------------------------------------------------------
+
+
+def default_cache_dir(environ: Optional[Mapping[str, str]] = None) -> str:
+    """Central tert fetch cache directory (honors TERT_FETCH_CACHE_DIR / XDG)."""
+    env = environ if environ is not None else os.environ
+    explicit = env.get("TERT_FETCH_CACHE_DIR")
+    if explicit:
+        return explicit
+    base = env.get("XDG_CACHE_HOME") or os.path.join(os.path.expanduser("~"), ".cache")
+    return os.path.join(base, "tert", "fetch")
+
+
+def _url_host(url: str) -> str:
+    """Best-effort host segment of a URL for cache namespacing."""
+    rest = url.split("://", 1)[-1]
+    host = rest.split("/", 1)[0].split("?", 1)[0].split("#", 1)[0]
+    host = host.split("@")[-1].split(":", 1)[0]
+    return host or "local"
+
+
+def cache_output_path(cache_dir: str, url: str) -> str:
+    """Compute the cache path ``<cache_dir>/cache/<host>/<filename>`` for a URL."""
+    return os.path.join(cache_dir, "cache", _url_host(url), basename_from_url(url))
+
+
+def meta_sidecar_path(outpath: str) -> str:
+    """Sidecar metadata path (``<outpath>.meta.yml``), as in fetchc."""
+    return outpath + ".meta.yml"
+
+
+def index_path(cache_dir: str) -> str:
+    return os.path.join(cache_dir, "index.meta.yml")
+
+
+def write_meta(outpath: str, prov: Dict[str, Any]) -> str:
+    """Write the YAML-LD metadata document next to *outpath* and return its path."""
+    meta = meta_sidecar_path(outpath)
+    os.makedirs(os.path.dirname(os.path.abspath(meta)), exist_ok=True)
+    from . import vc as _vc
+
+    with open(meta, "w", encoding="utf-8") as fh:
+        fh.write(_vc.dump_document(prov, "yaml"))
+    return meta
+
+
+def index_update(cache_dir: str, meta_path: str, url: str, sha256: Optional[str],
+                 dest_path: str) -> None:
+    """Append a reference to the central ``index.meta.yml`` (created if absent)."""
+    import yaml
+
+    os.makedirs(cache_dir, exist_ok=True)
+    idx = index_path(cache_dir)
+    data: Dict[str, Any] = {"filemetaschemaver": 1, "entries": []}
+    if os.path.exists(idx):
+        try:
+            with open(idx, "r", encoding="utf-8") as fh:
+                loaded = yaml.safe_load(fh) or {}
+            if isinstance(loaded, dict) and isinstance(loaded.get("entries"), list):
+                data = loaded
+        except OSError:
+            pass
+    data["entries"].append({
+        "meta_path": meta_path,
+        "source_url": url,
+        "sha256": sha256,
+        "dest_path": dest_path,
+        "indexed_at": _utc_now_iso(),
+    })
+    with open(idx, "w", encoding="utf-8") as fh:
+        yaml.safe_dump(data, fh, sort_keys=True)
+
+
+def query_ls(cache_dir: str) -> List[str]:
+    """List all known metadata files (from the index and the cache tree)."""
+    import yaml
+
+    metas: set = set()
+    idx = index_path(cache_dir)
+    if os.path.exists(idx):
+        try:
+            with open(idx, "r", encoding="utf-8") as fh:
+                loaded = yaml.safe_load(fh) or {}
+            for entry in loaded.get("entries", []) or []:
+                if entry.get("meta_path"):
+                    metas.add(entry["meta_path"])
+        except OSError:
+            pass
+    cache_tree = os.path.join(cache_dir, "cache")
+    for root, _dirs, files in os.walk(cache_tree):
+        for name in files:
+            if name.endswith(".meta.yml"):
+                metas.add(os.path.join(root, name))
+    return sorted(metas)
+
+
+def query_show(path: str) -> Optional[str]:
+    """Return the metadata text for an output path or a ``.meta.yml`` path."""
+    meta = path if path.endswith(".meta.yml") else meta_sidecar_path(path)
+    if not os.path.exists(meta):
+        return None
+    with open(meta, "r", encoding="utf-8") as fh:
+        return fh.read()
 
 
 # ---------------------------------------------------------------------------
@@ -274,6 +491,9 @@ class FetchStrategy:
     ) -> None:
         self.environ = environ if environ is not None else os.environ
         self.candidates = candidates
+        # Negotiated TLS parameters observed during the last download (if any).
+        self.tls_version: Optional[str] = None
+        self.tls_cipher: Optional[str] = None
 
     # -- introspection ------------------------------------------------------
 
@@ -332,7 +552,7 @@ class CurlStrategy(FetchStrategy):
         return shutil.which("curl")
 
     def build_command(self, url: str, part: str, cfg: CryptoConfig) -> List[str]:
-        cmd = ["curl", "-fsSL", "--proto", "=https,http,file"]
+        cmd = ["curl", "-fsSL", "-v", "--proto", "=https,http,file"]
         if cfg.ca_bundle_path and cfg.ca_bundle_exists:
             cmd += ["--cacert", cfg.ca_bundle_path]
         cmd += ["-o", part, url]
@@ -348,6 +568,8 @@ class CurlStrategy(FetchStrategy):
             proc = subprocess.run(cmd, capture_output=True, text=True)
         except OSError as exc:
             raise FetchError("curl invocation failed: %s" % exc)
+        # curl -v prints the negotiated TLS parameters to stderr.
+        self.tls_version, self.tls_cipher = parse_tls_info(proc.stderr)
         if proc.returncode != 0:
             _cleanup(part)
             raise FetchError(
@@ -365,7 +587,7 @@ class WgetStrategy(FetchStrategy):
         return shutil.which("wget")
 
     def build_command(self, url: str, part: str, cfg: CryptoConfig) -> List[str]:
-        cmd = ["wget", "-q", "-O", part]
+        cmd = ["wget", "-d", "-O", part]
         if cfg.ca_bundle_path and cfg.ca_bundle_exists:
             cmd.append("--ca-certificate=" + cfg.ca_bundle_path)
         cmd.append(url)
@@ -381,6 +603,8 @@ class WgetStrategy(FetchStrategy):
             proc = subprocess.run(cmd, capture_output=True, text=True)
         except OSError as exc:
             raise FetchError("wget invocation failed: %s" % exc)
+        # wget -d (debug) prints the negotiated TLS parameters to stderr.
+        self.tls_version, self.tls_cipher = parse_tls_info(proc.stderr)
         if proc.returncode != 0:
             _cleanup(part)
             raise FetchError(
@@ -470,12 +694,20 @@ def fetch(
     environ: Optional[Mapping[str, str]] = None,
     candidates: Sequence[str] = CA_BUNDLE_CANDIDATES,
     download: bool = True,
+    sign: bool = False,
+    keys_dir: Optional[str] = None,
+    key_backend: Optional[KeyBackend] = None,
+    cryptosuite: str = DEFAULT_CRYPTOSUITE,
+    cache: bool = False,
+    cache_dir: Optional[str] = None,
     log: Optional[logging.Logger] = None,
 ) -> FetchResult:
     """Fetch *url* with the selected strategy after verifying its crypto config.
 
     When *verify* is True and the crypto configuration cannot be verified, the
-    download is refused and :class:`FetchError` is raised.
+    download is refused and :class:`FetchError` is raised. When *sign* is True a
+    DID-signed provenance sidecar (``<dest>.prov.json``) is written using a
+    did-agent if available, else an on-disk key under *keys_dir*.
     """
     log = log or logger
     name = resolve_strategy_name(strategy, environ, candidates)
@@ -505,7 +737,14 @@ def fetch(
             % (url, "; ".join(problems))
         )
 
-    target = dest or basename_from_url(url)
+    # In cache mode the primary output goes into the central cache; an optional
+    # dest receives a copy afterwards.
+    final_dest = dest
+    if cache:
+        cache_dir = cache_dir or default_cache_dir(environ)
+        target = cache_output_path(cache_dir, url)
+    else:
+        target = dest or basename_from_url(url)
     result.dest = target
     if os.path.exists(target) and not overwrite:
         raise FetchError("destination exists (use --overwrite): %s" % target)
@@ -517,7 +756,43 @@ def fetch(
     result.downloaded = True
     result.bytes_written = file_size(target)
     result.sha256 = file_sha256(target)
+    result.tls_version = strat.tls_version
+    result.tls_cipher = strat.tls_cipher
     log.info("saved %s (%s bytes, sha256=%s)", target, result.bytes_written, result.sha256)
+    if result.tls_cipher:
+        log.info("tls: %s / %s", result.tls_version or "?", result.tls_cipher)
+
+    # Resolve a signing backend once (shared by provenance + cache metadata).
+    backend = None
+    if sign or cache:
+        backend = key_backend or resolve_key_backend(environ, keys_dir, log=log)
+
+    prov = build_provenance(result)
+    if backend is not None:
+        prov = sign_provenance(prov, backend, cryptosuite)
+        result.signed_by = backend.did()
+
+    if cache:
+        # Write YAML-LD metadata sidecar + central index, like fetchc.
+        meta = write_meta(target, prov)
+        index_update(cache_dir, meta, url, result.sha256, final_dest or target)
+        result.provenance_path = meta
+        log.info("wrote metadata %s", meta)
+        if final_dest and os.path.abspath(final_dest) != os.path.abspath(target):
+            if os.path.exists(final_dest) and not overwrite:
+                raise FetchError("destination exists (use --overwrite): %s" % final_dest)
+            os.makedirs(os.path.dirname(os.path.abspath(final_dest)), exist_ok=True)
+            shutil.copy2(target, final_dest)
+            log.info("copied cache -> %s", final_dest)
+    elif sign:
+        if backend is None:
+            log.warning("signing requested but no key backend available; provenance unsigned")
+        else:
+            sidecar = provenance_sidecar_path(target)
+            with open(sidecar, "w", encoding="utf-8") as fh:
+                json.dump(prov, fh, indent=2)
+            result.provenance_path = sidecar
+            log.info("wrote signed provenance %s (issuer %s)", sidecar, backend.did())
     return result
 
 
@@ -550,10 +825,50 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Do not refuse the download if crypto cannot be verified")
     parser.add_argument("--overwrite", action="store_true",
                         help="Overwrite an existing destination")
+    parser.add_argument("--sign", action="store_true",
+                        help="Write a DID-signed provenance sidecar (<dest>.prov.json)")
+    parser.add_argument("--cryptosuite", default=DEFAULT_CRYPTOSUITE,
+                        help="signing cryptosuite (default: %s)" % DEFAULT_CRYPTOSUITE)
+    parser.add_argument("--keys-dir",
+                        help="On-disk key directory if no did-agent is available")
+    parser.add_argument("--cache", action="store_true",
+                        help="Store the download in the central cache with a signed .meta.yml")
+    parser.add_argument("--cache-dir",
+                        help="Central cache directory (default: $XDG_CACHE_HOME/tert/fetch)")
+    parser.add_argument("--query", choices=["ls", "show"],
+                        help="Query cached metadata: 'ls' lists, 'show <path>' prints a .meta.yml")
+    parser.add_argument("--verify-file", metavar="PATH",
+                        help="Verify a provenance sidecar JSON file and exit")
+    parser.add_argument("--record", action=argparse.BooleanOptionalAction, default=True,
+                        help="Record this fetch in the replog and register the downloaded "
+                             "artifact (default: on; use --no-record to skip)")
+    parser.add_argument("--reports-dir", default="reports",
+                        help="Reports directory for recorded fetches")
+    parser.add_argument("--replog-db", default="reports/replog.db",
+                        help="Replog SQLite database path for recorded fetches")
     parser.add_argument("--json", action="store_true",
                         help="Emit the result as JSON")
     parser.add_argument("-v", "--verbose", action="store_true", help="Verbose logging")
     return parser
+
+
+def _strip_record_flags(argv: Sequence[str]) -> List[str]:
+    """Remove the record-control flags so the rest can be replayed as fetch args."""
+    out: List[str] = []
+    skip = False
+    for arg in argv:
+        if skip:
+            skip = False
+            continue
+        if arg in ("--record", "--no-record"):
+            continue
+        if arg in ("--reports-dir", "--replog-db"):
+            skip = True
+            continue
+        if arg.startswith("--reports-dir=") or arg.startswith("--replog-db="):
+            continue
+        out.append(arg)
+    return out
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
@@ -565,6 +880,29 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     strategy = args.strategy or "auto"
 
+    if args.verify_file:
+        ok = verify_provenance_file(args.verify_file)
+        print("provenance verify: %s" % ("OK" if ok else "FAILED"))
+        return 0 if ok else 1
+
+    if args.query:
+        cache_dir = args.cache_dir or default_cache_dir()
+        if args.query == "ls":
+            for meta in query_ls(cache_dir):
+                print(meta)
+            return 0
+        # show
+        if not args.url:
+            parser.error("fetch --query show requires a path")
+        text = query_show(args.url)
+        if text is None:
+            logger.error("no metadata found for %s", args.url)
+            return 1
+        print(text)
+        return 0
+
+    # Non-download actions (crypto-only / query / verify) are never recorded and
+    # are handled below; an actual download is recorded by default (see --record).
     if args.crypto_only:
         name = resolve_strategy_name(strategy)
         cfg = get_strategy(name).crypto_config()
@@ -589,6 +927,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             strategy=strategy,
             verify=not args.no_verify_crypto,
             overwrite=args.overwrite,
+            sign=args.sign,
+            keys_dir=args.keys_dir,
+            cryptosuite=args.cryptosuite,
+            cache=args.cache,
+            cache_dir=args.cache_dir,
         )
     except NotImplementedError as exc:
         logger.error("%s", exc)
@@ -596,6 +939,23 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     except FetchError as exc:
         logger.error("%s", exc)
         return 1
+
+    # Record the download in the replog by default (``--no-record`` to skip).
+    if args.record:
+        from pathlib import Path
+        from .run_tests import record_run, ReplogDB
+
+        artifact_paths = [p for p in (result.dest, result.provenance_path) if p]
+        record_run(
+            Path(args.reports_dir),
+            ReplogDB(Path(args.replog_db)),
+            command="fetch " + " ".join(_strip_record_flags(argv)),
+            exit_code=result.exit_code,
+            artifact_paths=artifact_paths,
+            summary_sign=args.sign,
+            keys_dir=args.keys_dir,
+            cryptosuite=args.cryptosuite,
+        )
 
     if args.json:
         print(json.dumps(result.to_dict(), indent=2))

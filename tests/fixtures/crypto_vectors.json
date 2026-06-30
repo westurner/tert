@@ -1,0 +1,37 @@
+[
+  {
+    "seed_hex": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
+    "message_utf8": "tert interop vector",
+    "pubkey_hex": "79b5562e8fe654f94078b112e8a98ba7901f853ae695bed7e0e3910bad049664",
+    "sig_hex": "9fb183d7857702b7d322421901c85e8c9aea7f7d355824164f7e06e394e7f26271f9793b55d8406efdc95c00defb04a0e90b6c9b60640688c8e04a9dc4ba7701",
+    "did": "did:key:z6MkneMkZqwqRiU5mJzSG3kDwzt9P8C59N4NGTfBLfSGE7c7"
+  },
+  {
+    "seed_hex": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
+    "message_utf8": "",
+    "pubkey_hex": "79b5562e8fe654f94078b112e8a98ba7901f853ae695bed7e0e3910bad049664",
+    "sig_hex": "d9452bd4cc80bcecf4a18895094646e91a5a9bbf1b2707e05396b2cf67c9c2b7d9b847a0d562425ccbb71038c7649fdcbfd76ee0e8247c8ec9326999b6256a0b",
+    "did": "did:key:z6MkneMkZqwqRiU5mJzSG3kDwzt9P8C59N4NGTfBLfSGE7c7"
+  },
+  {
+    "seed_hex": "4242424242424242424242424242424242424242424242424242424242424242",
+    "message_utf8": "hello world",
+    "pubkey_hex": "2152f8d19b791d24453242e15f2eab6cb7cffa7b6a5ed30097960e069881db12",
+    "sig_hex": "92fe576d4d2bde8fd4dd1cc4ed90e7f630fc61036abda3e048b3ba200736eaf2308800354ee37930e9a1ccec8bf5566baffb35ccdfecea5bfcfa388ace480808",
+    "did": "did:key:z6MkghLt1e8m1fmANsdJJco3aCLV8Xnigr5UWwC3u5iZFPd3"
+  },
+  {
+    "seed_hex": "0000000000000000000000000000000000000000000000000000000000000001",
+    "message_utf8": "edge seed 0..01",
+    "pubkey_hex": "4cb5abf6ad79fbf5abbccafcc269d85cd2651ed4b885b5869f241aedf0a5ba29",
+    "sig_hex": "244acf2659cf2f29c3c3277a46d67917cc9bda5f0442b57325322364980a3ccc80dd89efc88c1c0aafbf80ac3dde43cef7bebc7640eac9acb372806cbc9dba06",
+    "did": "did:key:z6MkjchhfUsD6mmvni8mCdXHw216Xrm9bQe2mBH1P5RDjVJG"
+  },
+  {
+    "seed_hex": "fffefdfcfbfaf9f8f7f6f5f4f3f2f1f0efeeedecebeae9e8e7e6e5e4e3e2e1e0",
+    "message_utf8": "descending seed bytes",
+    "pubkey_hex": "bafc71bead3ac5e4b63e9c8216ee71a34aaec65722eedbca728b4e9b3ccce396",
+    "sig_hex": "d2de521b3b080d556f1a42d7ddbc102953e883522612ffa129ba1a449a5177959c59f657636c0e3f9d3d5dc46eb46082878e4b57f16cd3ef7ae3de61a6f33d0d",
+    "did": "did:key:z6Mks3B96D2HSijA2uLmVSpqN1SwVxWgowZ4k1RtA64oSMwb"
+  }
+]

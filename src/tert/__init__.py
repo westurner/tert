@@ -4,6 +4,28 @@ __version__ = "0.1.0"
 __author__ = "westurner"
 
 from .shellwrap import Shellwrap
+from .crypto import (
+    ed25519_publickey,
+    ed25519_sign,
+    ed25519_verify,
+    did_key_from_pubkey,
+    pubkey_from_did_key,
+)
+from .did_agent import (
+    DidAgent,
+    DidAgentClient,
+    DidAgentServer,
+    DidAgentError,
+)
+from .vc import (
+    canonicalize,
+    sign_document,
+    verify_document,
+    get_cryptosuite,
+    CRYPTOSUITES,
+    CryptosuiteError,
+    DEFAULT_CRYPTOSUITE,
+)
 from .fetch import (
     CryptoConfig,
     FetchResult,
@@ -15,6 +37,14 @@ from .fetch import (
     fetch,
     verify_crypto_config,
     discover_ca_bundle,
+    KeyBackend,
+    AgentKeyBackend,
+    FileKeyBackend,
+    resolve_key_backend,
+    build_provenance,
+    sign_provenance,
+    verify_provenance,
+    verify_provenance_file,
 )
 from .run_tests import (
     ReplogDB,
@@ -35,6 +65,22 @@ from .run_tests import (
 
 __all__ = [
     "Shellwrap",
+    "ed25519_publickey",
+    "ed25519_sign",
+    "ed25519_verify",
+    "did_key_from_pubkey",
+    "pubkey_from_did_key",
+    "DidAgent",
+    "DidAgentClient",
+    "DidAgentServer",
+    "DidAgentError",
+    "canonicalize",
+    "sign_document",
+    "verify_document",
+    "get_cryptosuite",
+    "CRYPTOSUITES",
+    "CryptosuiteError",
+    "DEFAULT_CRYPTOSUITE",
     "CryptoConfig",
     "FetchResult",
     "FetchError",
@@ -45,6 +91,14 @@ __all__ = [
     "fetch",
     "verify_crypto_config",
     "discover_ca_bundle",
+    "KeyBackend",
+    "AgentKeyBackend",
+    "FileKeyBackend",
+    "resolve_key_backend",
+    "build_provenance",
+    "sign_provenance",
+    "verify_provenance",
+    "verify_provenance_file",
     "ReplogDB",
     "TertTestRun",
     "TertTestRunner",

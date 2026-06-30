@@ -72,6 +72,117 @@ A download is refused when the crypto configuration cannot be verified (pass
 `--no-verify-crypto` to override). The `--rust` strategy is a stub that reports
 and verifies its intended crypto config but does not yet download.
 
+The negotiated TLS version and cipher (e.g. `TLSv1.3 / TLS_AES_128_GCM_SHA256`)
+are parsed from the downloader's verbose output and recorded in the signed
+metadata.
+
+#### Central cache with signed YAML-LD metadata (fetchc-style)
+
+```bash
+# Cache under $XDG_CACHE_HOME/tert/fetch/cache/<host>/<file> with a signed
+# <file>.meta.yml (VC 2.0 / W3C PROV) and a central index.meta.yml.
+tert fetch --cache --keys-dir ./keys https://example.com/file.tar.gz
+
+tert fetch --query ls                 # list cached metadata
+tert fetch --query show <path>        # show a .meta.yml (or its output path)
+```
+
+#### Logging a fetch as a run
+
+By default, `tert fetch` records each download in the replog and registers the
+downloaded file as an output artifact (with an artifact summary), reusing the
+same reporting machinery as test runs. Use `--no-record` for a plain download.
+`fetch` is also registered as a runner.
+
+```bash
+tert fetch https://example.com/file.tar.gz            # records by default
+tert fetch --no-record https://example.com/file.tar.gz # plain download
+tert fetch --json https://example.com/file.tar.gz      # prints JSON *and* records
+tert run --runner fetch -- https://example.com/file.tar.gz
+tert query artifact-summaries reports/latest
+```
+
+#### DID-signed download provenance with the did-agent
+
+`tert` ships an ssh-agent-style signing agent that holds an Ed25519 `did:key`
+private key **in memory only** (never written to disk) and signs over a Unix
+socket. This avoids leaving a DID key unprotected on disk: clients sign through
+the agent instead of reading a key file.
+
+```bash
+# Start the agent (prints a DID_AGENT_SOCK export line); seed source can be an
+# ephemeral key, a --seed-file, or the DID_AGENT_SEED env var.
+eval "$(tert did-agent serve --print-env)"
+
+# Client actions against $DID_AGENT_SOCK
+tert did-agent did
+tert did-agent pubkey
+tert did-agent sign "some message"
+
+# A native Rust binary speaks the same wire protocol and is interoperable:
+did-agent serve --print-env        # cargo bin: target/release/did-agent
+```
+
+With an agent running (or an on-disk fallback key), `tert fetch --sign` writes a
+DID-signed provenance sidecar (`<dest>.prov.json`, a VC-2.0 / W3C-PROV document)
+recording the URL, sha256, strategy and the verified TLS/CA configuration:
+
+```bash
+tert fetch --sign https://example.com/file.tar.gz
+tert fetch --verify-file file.tar.gz.prov.json
+```
+
+The agent protocol (newline-delimited UTF-8 over `AF_UNIX`):
+
+```text
+PING           -> OK pong
+DID            -> OK did:key:z6Mk...
+PUBKEY         -> OK <base64 public key>
+SIGN <base64>  -> OK <base64 signature>
+```
+
+The Python (`tert.crypto`) and Rust (`tert::crypto`) Ed25519 implementations are
+dependency-free, produce byte-identical signatures, and are validated against
+OpenSSL.
+
+#### Signing VC / YAML-LD documents and cryptosuites
+
+`tert vc` signs and verifies Verifiable Credential documents (JSON or YAML-LD)
+with a pluggable *cryptosuite*:
+
+```bash
+tert vc cryptosuites              # list suites and availability
+tert vc sign doc.yaml --keys-dir ./keys -o doc.signed.yaml
+tert vc verify doc.signed.yaml
+```
+
+| cryptosuite          | status | notes                                          |
+|----------------------|--------|------------------------------------------------|
+| `eddsa-jcs-2022`     | ready  | Ed25519 over canonical JSON (default)          |
+| `mldsa-87-p256`      | stub   | post-quantum hybrid ML-DSA-87 + ECDSA-P256     |
+| `merkle-tree-certs`  | stub   | Merkle Tree Certificates                       |
+
+The canonicalization (a JCS-style subset) and `eddsa-jcs-2022` proofs are
+byte-for-byte interoperable between Python (`tert.vc`) and Rust (`tert::vc`,
+including the standalone `vc` binary). JSON, YAML-LD and TOML serializations are
+all supported; in TOML a credential is embedded under the provisional
+`[verifiableCredential]` table so it canonicalizes identically across formats.
+
+#### Artifact summaries (YAML-LD / PROV)
+
+`tert run` can record signed input/output artifact summaries (path, size,
+sha256) as YAML-LD `prov:Entity` documents:
+
+```bash
+tert run --input data.csv --input-checksum sha256:<hex> \
+         --summary-sign --keys-dir ./keys pytest tests/
+tert query artifact-summaries reports/latest
+```
+
+Input summaries are generated, printed and stored before the run (failing the
+run on a checksum mismatch); output summaries are generated for produced
+artifacts after the run.
+
 #### As a Python Library
 
 ```python
@@ -161,7 +272,9 @@ SQLite database storing:
 ### CLI Commands
 
 - `run` [options]: Execute a test suite and record results
-- `fetch` <url> [dest]: Download a URL with a selectable strategy (`--curl`, `--wget`, `--rust`), logging and verifying the TLS crypto config and CA cert bundle
+- `fetch` <url> [dest]: Download a URL with a selectable strategy (`--curl`, `--wget`, `--rust`), logging and verifying the TLS crypto config and CA cert bundle; `--sign` writes DID-signed provenance; `--cache` caches with a signed `.meta.yml` + index; `--query ls|show`
+- `did-agent` [serve|did|pubkey|sign|ping]: ssh-agent-style in-memory Ed25519 `did:key` signer
+- `vc` [sign|verify|cryptosuites]: sign/verify Verifiable Credential (JSON/YAML-LD) documents
 - `ls` [args]: List report directories
 - `show` [reportdir]: Display contents of a report
 - `query` {runs|artifacts|coverage-lines}: Query the replog database

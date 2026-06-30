@@ -6,6 +6,9 @@
 pub mod shellwrap;
 pub mod run_tests;
 pub mod fetch;
+pub mod crypto;
+pub mod did_agent;
+pub mod vc;
 
 use pyo3::prelude::*;
 use regex::Regex;

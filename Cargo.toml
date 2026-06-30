@@ -14,6 +14,10 @@ libc = "0.2"
 chrono = "0.4"
 rusqlite = { version = "0.30", features = ["bundled"] }
 shlex = "2.0.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+toml = "0.9"
 
 [lib]
 name = "tert"
@@ -26,6 +30,14 @@ path = "src/bin/shellwrap.rs"
 [[bin]]
 name = "run_tests"
 path = "src/bin/run_tests.rs"
+
+[[bin]]
+name = "did-agent"
+path = "src/bin/did_agent.rs"
+
+[[bin]]
+name = "vc"
+path = "src/bin/vc.rs"
 
 [profile.release]
 opt-level = 3
