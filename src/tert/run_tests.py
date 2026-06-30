@@ -15,6 +15,7 @@ Usage:
 import os
 import sys
 import json
+import shlex
 import sqlite3
 import subprocess
 import argparse
@@ -47,6 +48,30 @@ def _format_timestamp_ns(ns: int) -> str:
     nanos = ns % 1_000_000_000
     dt = datetime.fromtimestamp(secs, tz=timezone.utc)
     return dt.strftime('%Y-%m-%dT%H:%M:%S') + f'.{nanos:09d}+00:00'
+
+
+def _interpreter_cmd(interpreter: str, args, command_flag: Optional[str] = "-c") -> List[str]:
+    """Build an argv for an interpreter (sh/bash/zsh/python/ipython).
+
+    - No args: just the interpreter.
+    - First arg is an option (starts with '-'): pass args through verbatim so
+      explicit invocations like ``-x -c "cmd"`` work as written.
+    - First arg is an existing file: run it as a script.
+    - Otherwise, when ``command_flag`` is set (shells): treat the remaining args
+      as an inline command string via ``command_flag`` (e.g. ``sh -c "whoami"``).
+      Args are re-joined with :func:`shlex.join` quoting so the original word
+      boundaries and metacharacters are preserved.
+    - Otherwise, when ``command_flag`` is ``None`` (python/ipython): pass args
+      through verbatim. There is no implicit ``-c`` wrapping — an inline command
+      must be requested explicitly (e.g. ``python -- -c "print(1)"``).
+    """
+    args = [str(a) for a in args]
+    if not args:
+        return [interpreter]
+    if command_flag is None or args[0].startswith("-") or Path(args[0]).is_file():
+        return [interpreter] + args
+    return [interpreter, command_flag, shlex.join(args)]
+
 
 
 @dataclass
@@ -737,6 +762,66 @@ class ShellcovRunner(TertTestRunner):
             return self.shellwrap.execute_streaming()
 
 
+class ShRunner(TertTestRunner):
+    """sh script runner."""
+
+    def run(self, *args) -> int:
+        """Run sh with Shellwrap for colored output."""
+        cmd = _interpreter_cmd("sh", args)
+
+        self.shellwrap.set_color_env()
+        self.shellwrap.commands = [shlex.join(cmd)]
+        return self.shellwrap.execute_streaming()
+
+
+class BashRunner(TertTestRunner):
+    """bash script runner."""
+
+    def run(self, *args) -> int:
+        """Run bash with Shellwrap for colored output."""
+        cmd = _interpreter_cmd("bash", args)
+
+        self.shellwrap.set_color_env()
+        self.shellwrap.commands = [shlex.join(cmd)]
+        return self.shellwrap.execute_streaming()
+
+
+class ZshRunner(TertTestRunner):
+    """zsh script runner."""
+
+    def run(self, *args) -> int:
+        """Run zsh with Shellwrap for colored output."""
+        cmd = _interpreter_cmd("zsh", args)
+
+        self.shellwrap.set_color_env()
+        self.shellwrap.commands = [shlex.join(cmd)]
+        return self.shellwrap.execute_streaming()
+
+
+class PythonRunner(TertTestRunner):
+    """python script runner."""
+
+    def run(self, *args) -> int:
+        """Run python with Shellwrap for colored output."""
+        cmd = _interpreter_cmd(sys.executable, args, command_flag=None)
+
+        self.shellwrap.set_color_env()
+        self.shellwrap.commands = [shlex.join(cmd)]
+        return self.shellwrap.execute_streaming()
+
+
+class IpythonRunner(TertTestRunner):
+    """ipython script runner."""
+
+    def run(self, *args) -> int:
+        """Run ipython with Shellwrap for colored output."""
+        cmd = _interpreter_cmd("ipython", args, command_flag=None)
+
+        self.shellwrap.set_color_env()
+        self.shellwrap.commands = [shlex.join(cmd)]
+        return self.shellwrap.execute_streaming()
+
+
 def get_runner(runner_name: str, out_dir: Path) -> TertTestRunner:
     """Instantiate the appropriate runner."""
     runners = {
@@ -748,6 +833,11 @@ def get_runner(runner_name: str, out_dir: Path) -> TertTestRunner:
         "tox": ToxRunner,
         "bashcov": BashcovRunner,
         "shellcov": ShellcovRunner,
+        "sh": ShRunner,
+        "bash": BashRunner,
+        "zsh": ZshRunner,
+        "python": PythonRunner,
+        "ipython": IpythonRunner,
     }
     runner_class = runners.get(runner_name)
     if not runner_class:
@@ -850,7 +940,7 @@ def main():
         print("       Tests must use mocking instead of calling main()", file=sys.stderr)
         return 1
     
-    known_runners = ["pytest", "cargo", "go", "jest", "vitest", "tox"]
+    known_runners = ["pytest", "cargo", "go", "jest", "vitest", "tox", "sh", "bash", "zsh", "python", "ipython"]
     known_commands = ["run", "ls", "show", "query"]
     command_aliases = {"q": "query", "l": "ls", "s": "show"}
     subquery_aliases = {"l": "lines", "a": "artifacts", "r": "runs", "lines": "coverage-lines"}
@@ -858,7 +948,8 @@ def main():
     
     argv = sys.argv[1:]
     
-    if argv and len(argv[0]) > 1 and not argv[0].startswith("-"):
+    if (argv and len(argv[0]) > 1 and not argv[0].startswith("-")
+            and argv[0] not in known_runners and argv[0] not in known_commands):
         first_arg = argv[0]
         if first_arg[0] in command_aliases:
             cmd_alias = first_arg[0]
@@ -891,7 +982,7 @@ def main():
     subparsers = parser.add_subparsers(dest="command")
     
     run_parser = subparsers.add_parser("run", help="Run tests")
-    run_parser.add_argument("--runner", default="pytest", choices=["pytest", "cargo", "go", "jest", "vitest", "tox"], help="Test runner to use")
+    run_parser.add_argument("--runner", default="pytest", choices=["pytest", "cargo", "go", "jest", "vitest", "tox", "sh", "bash", "zsh", "python", "ipython"], help="Test runner to use")
     run_parser.add_argument("--reports-dir", type=Path, default=Path("reports"), help="Reports directory")
     run_parser.add_argument("--replog-db", type=Path, default=Path("reports/replog.db"), help="Replog SQLite database path")
     run_parser.add_argument("--no-artifacts", action="store_true", help="Skip storing artifacts")
@@ -921,7 +1012,7 @@ def main():
         runner_args = list(args.runner_args) if args.runner_args else []
         runner_args.extend(unknown)
         
-        if runner_args and runner_args[0] in ["pytest", "cargo", "go", "jest", "vitest", "tox"]:
+        if runner_args and runner_args[0] in known_runners:
             runner = runner_args[0]
             runner_args = runner_args[1:]
         

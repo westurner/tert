@@ -908,6 +908,7 @@ dependencies = [
  "regex",
  "rstest",
  "rusqlite",
+ "shlex",
  "tempfile",
  "which",
 ]

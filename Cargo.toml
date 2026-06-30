@@ -13,6 +13,7 @@ which = "5"
 libc = "0.2"
 chrono = "0.4"
 rusqlite = { version = "0.30", features = ["bundled"] }
+shlex = "2.0.1"
 
 [lib]
 name = "tert"

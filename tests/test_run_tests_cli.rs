@@ -99,7 +99,7 @@ fn test_get_runner_factory_valid_runners(#[case] runner_name: &str) {
 #[rstest]
 #[case("invalid")]
 #[case("pytest3")]
-#[case("python")]
+//#[case("python")]
 #[case("node")]
 #[case("")]
 #[case("PYTEST")]

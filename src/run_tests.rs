@@ -974,6 +974,172 @@ impl TestRunner for ShellcovRunner {
     }
 }
 
+/// Build argv tail for an interpreter (sh/bash/zsh/python/ipython).
+///
+/// - No args: empty (just run the interpreter).
+/// - First arg is an option (starts with '-'): pass through verbatim so
+///   explicit invocations like `-x -c "cmd"` work as written.
+/// - First arg is an existing file: run it as a script.
+/// - Otherwise, when `command_flag` is `Some(flag)` (shells): treat the args as
+///   an inline command string via `flag` (e.g. `sh -c "whoami"`). Args are
+///   re-joined with `shlex` quoting so the original word boundaries and
+///   metacharacters are preserved.
+/// - Otherwise, when `command_flag` is `None` (python/ipython): pass args
+///   through verbatim. There is no implicit `-c` wrapping — an inline command
+///   must be requested explicitly (e.g. `python -- -c "print(1)"`).
+fn interpreter_args(args: &[&str], command_flag: Option<&str>) -> Vec<String> {
+    if args.is_empty() {
+        return Vec::new();
+    }
+    if command_flag.is_none() || args[0].starts_with('-') || Path::new(args[0]).is_file() {
+        return args.iter().map(|s| s.to_string()).collect();
+    }
+    let flag = command_flag.unwrap();
+    let joined = shlex::try_join(args.iter().copied())
+        .expect("interpreter command args must not contain NUL bytes");
+    vec![flag.to_string(), joined]
+}
+
+/// Sh script runner
+#[allow(dead_code)]
+pub struct ShRunner {
+    out_dir: PathBuf,
+}
+
+impl ShRunner {
+    pub fn new(out_dir: impl AsRef<Path>) -> Self {
+        ShRunner {
+            out_dir: out_dir.as_ref().to_path_buf(),
+        }
+    }
+}
+
+impl TestRunner for ShRunner {
+    fn name(&self) -> &str {
+        "sh"
+    }
+
+    fn run(&self, args: &[&str]) -> std::io::Result<i32> {
+        let mut cmd = Command::new("sh");
+        cmd.args(interpreter_args(args, Some("-c")));
+
+        let status = cmd.status()?;
+        Ok(status.code().unwrap_or(1))
+    }
+}
+
+/// Bash script runner
+#[allow(dead_code)]
+pub struct BashRunner {
+    out_dir: PathBuf,
+}
+
+impl BashRunner {
+    pub fn new(out_dir: impl AsRef<Path>) -> Self {
+        BashRunner {
+            out_dir: out_dir.as_ref().to_path_buf(),
+        }
+    }
+}
+
+impl TestRunner for BashRunner {
+    fn name(&self) -> &str {
+        "bash"
+    }
+
+    fn run(&self, args: &[&str]) -> std::io::Result<i32> {
+        let mut cmd = Command::new("bash");
+        cmd.args(interpreter_args(args, Some("-c")));
+
+        let status = cmd.status()?;
+        Ok(status.code().unwrap_or(1))
+    }
+}
+
+/// Zsh script runner
+#[allow(dead_code)]
+pub struct ZshRunner {
+    out_dir: PathBuf,
+}
+
+impl ZshRunner {
+    pub fn new(out_dir: impl AsRef<Path>) -> Self {
+        ZshRunner {
+            out_dir: out_dir.as_ref().to_path_buf(),
+        }
+    }
+}
+
+impl TestRunner for ZshRunner {
+    fn name(&self) -> &str {
+        "zsh"
+    }
+
+    fn run(&self, args: &[&str]) -> std::io::Result<i32> {
+        let mut cmd = Command::new("zsh");
+        cmd.args(interpreter_args(args, Some("-c")));
+
+        let status = cmd.status()?;
+        Ok(status.code().unwrap_or(1))
+    }
+}
+
+/// Python script runner
+#[allow(dead_code)]
+pub struct PythonRunner {
+    out_dir: PathBuf,
+}
+
+impl PythonRunner {
+    pub fn new(out_dir: impl AsRef<Path>) -> Self {
+        PythonRunner {
+            out_dir: out_dir.as_ref().to_path_buf(),
+        }
+    }
+}
+
+impl TestRunner for PythonRunner {
+    fn name(&self) -> &str {
+        "python"
+    }
+
+    fn run(&self, args: &[&str]) -> std::io::Result<i32> {
+        let mut cmd = Command::new("python3");
+        cmd.args(interpreter_args(args, None));
+
+        let status = cmd.status()?;
+        Ok(status.code().unwrap_or(1))
+    }
+}
+
+/// IPython script runner
+#[allow(dead_code)]
+pub struct IpythonRunner {
+    out_dir: PathBuf,
+}
+
+impl IpythonRunner {
+    pub fn new(out_dir: impl AsRef<Path>) -> Self {
+        IpythonRunner {
+            out_dir: out_dir.as_ref().to_path_buf(),
+        }
+    }
+}
+
+impl TestRunner for IpythonRunner {
+    fn name(&self) -> &str {
+        "ipython"
+    }
+
+    fn run(&self, args: &[&str]) -> std::io::Result<i32> {
+        let mut cmd = Command::new("ipython");
+        cmd.args(interpreter_args(args, None));
+
+        let status = cmd.status()?;
+        Ok(status.code().unwrap_or(1))
+    }
+}
+
 /// Factory function to create a test runner
 pub fn get_runner(name: &str, out_dir: &Path) -> Option<Box<dyn TestRunner>> {
     match name {
@@ -985,6 +1151,11 @@ pub fn get_runner(name: &str, out_dir: &Path) -> Option<Box<dyn TestRunner>> {
         "tox" => Some(Box::new(ToxRunner::new(out_dir))),
         "bashcov" => Some(Box::new(BashcovRunner::new(out_dir))),
         "shellcov" => Some(Box::new(ShellcovRunner::new(out_dir))),
+        "sh" => Some(Box::new(ShRunner::new(out_dir))),
+        "bash" => Some(Box::new(BashRunner::new(out_dir))),
+        "zsh" => Some(Box::new(ZshRunner::new(out_dir))),
+        "python" => Some(Box::new(PythonRunner::new(out_dir))),
+        "ipython" => Some(Box::new(IpythonRunner::new(out_dir))),
         _ => None,
     }
 }

@@ -7,7 +7,7 @@ use std::env;
 use std::process;
 use std::path::PathBuf;
 use tert::run_tests::{
-    TestRun, ReplogDB, get_runner, get_epoch, get_epoch_ns, get_timestamp_ns,
+    TestRun, ReplogDB, get_runner, get_epoch_ns, get_timestamp_ns,
     create_reports_dir, create_latest_symlink
 };
 
