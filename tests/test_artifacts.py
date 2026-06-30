@@ -1,4 +1,5 @@
 """Pytest tests for tert.artifacts."""
+
 import json
 
 import pytest

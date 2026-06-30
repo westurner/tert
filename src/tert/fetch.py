@@ -51,11 +51,11 @@ if not logger.handlers:
 
 #: Common system CA bundle locations, in priority order.
 CA_BUNDLE_CANDIDATES: Sequence[str] = (
-    "/etc/pki/tls/certs/ca-bundle.crt",        # Fedora / RHEL (OpenSSL default)
-    "/etc/ssl/certs/ca-certificates.crt",      # Debian / Ubuntu / Alpine
-    "/etc/ssl/cert.pem",                       # OpenBSD / macOS / OpenSSL
-    "/etc/pki/tls/cert.pem",                   # RHEL alternate
-    "/etc/ssl/ca-bundle.pem",                  # openSUSE
+    "/etc/pki/tls/certs/ca-bundle.crt",  # Fedora / RHEL (OpenSSL default)
+    "/etc/ssl/certs/ca-certificates.crt",  # Debian / Ubuntu / Alpine
+    "/etc/ssl/cert.pem",  # OpenBSD / macOS / OpenSSL
+    "/etc/pki/tls/cert.pem",  # RHEL alternate
+    "/etc/ssl/ca-bundle.pem",  # openSUSE
     "/usr/local/share/certs/ca-root-nss.crt",  # FreeBSD
 )
 
@@ -407,8 +407,9 @@ def write_meta(outpath: str, prov: Dict[str, Any]) -> str:
     return meta
 
 
-def index_update(cache_dir: str, meta_path: str, url: str, sha256: Optional[str],
-                 dest_path: str) -> None:
+def index_update(
+    cache_dir: str, meta_path: str, url: str, sha256: Optional[str], dest_path: str
+) -> None:
     """Append a reference to the central ``index.meta.yml`` (created if absent)."""
     import yaml
 
@@ -423,13 +424,15 @@ def index_update(cache_dir: str, meta_path: str, url: str, sha256: Optional[str]
                 data = loaded
         except OSError:
             pass
-    data["entries"].append({
-        "meta_path": meta_path,
-        "source_url": url,
-        "sha256": sha256,
-        "dest_path": dest_path,
-        "indexed_at": _utc_now_iso(),
-    })
+    data["entries"].append(
+        {
+            "meta_path": meta_path,
+            "source_url": url,
+            "sha256": sha256,
+            "dest_path": dest_path,
+            "indexed_at": _utc_now_iso(),
+        }
+    )
     with open(idx, "w", encoding="utf-8") as fh:
         yaml.safe_dump(data, fh, sort_keys=True)
 
@@ -573,7 +576,8 @@ class CurlStrategy(FetchStrategy):
         if proc.returncode != 0:
             _cleanup(part)
             raise FetchError(
-                "curl failed (exit %d): %s" % (proc.returncode, (proc.stderr or "").strip())
+                "curl failed (exit %d): %s"
+                % (proc.returncode, (proc.stderr or "").strip())
             )
         os.replace(part, dest)
         return 0
@@ -608,7 +612,8 @@ class WgetStrategy(FetchStrategy):
         if proc.returncode != 0:
             _cleanup(part)
             raise FetchError(
-                "wget failed (exit %d): %s" % (proc.returncode, (proc.stderr or "").strip())
+                "wget failed (exit %d): %s"
+                % (proc.returncode, (proc.stderr or "").strip())
             )
         os.replace(part, dest)
         return 0
@@ -631,11 +636,15 @@ class RustStrategy(FetchStrategy):
         cfg = super().crypto_config()
         cfg.tls_backend = "rustls"
         cfg.notes.append("native rust fetch strategy is a stub; not yet implemented")
-        cfg.notes.append("planned: rustls with rustls-native-certs over the system CA bundle")
+        cfg.notes.append(
+            "planned: rustls with rustls-native-certs over the system CA bundle"
+        )
         return cfg
 
     def download(self, url: str, dest: str, cfg: CryptoConfig) -> int:
-        raise NotImplementedError("the rust fetch strategy is not yet implemented (stub)")
+        raise NotImplementedError(
+            "the rust fetch strategy is not yet implemented (stub)"
+        )
 
 
 _STRATEGIES = {
@@ -758,7 +767,9 @@ def fetch(
     result.sha256 = file_sha256(target)
     result.tls_version = strat.tls_version
     result.tls_cipher = strat.tls_cipher
-    log.info("saved %s (%s bytes, sha256=%s)", target, result.bytes_written, result.sha256)
+    log.info(
+        "saved %s (%s bytes, sha256=%s)", target, result.bytes_written, result.sha256
+    )
     if result.tls_cipher:
         log.info("tls: %s / %s", result.tls_version or "?", result.tls_cipher)
 
@@ -780,13 +791,17 @@ def fetch(
         log.info("wrote metadata %s", meta)
         if final_dest and os.path.abspath(final_dest) != os.path.abspath(target):
             if os.path.exists(final_dest) and not overwrite:
-                raise FetchError("destination exists (use --overwrite): %s" % final_dest)
+                raise FetchError(
+                    "destination exists (use --overwrite): %s" % final_dest
+                )
             os.makedirs(os.path.dirname(os.path.abspath(final_dest)), exist_ok=True)
             shutil.copy2(target, final_dest)
             log.info("copied cache -> %s", final_dest)
     elif sign:
         if backend is None:
-            log.warning("signing requested but no key backend available; provenance unsigned")
+            log.warning(
+                "signing requested but no key backend available; provenance unsigned"
+            )
         else:
             sidecar = provenance_sidecar_path(target)
             with open(sidecar, "w", encoding="utf-8") as fh:
@@ -810,44 +825,96 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("url", nargs="?", help="URL to fetch")
     parser.add_argument("dest", nargs="?", help="Destination path")
     group = parser.add_mutually_exclusive_group()
-    group.add_argument("--curl", action="store_const", dest="strategy", const="curl",
-                       help="Use the curl strategy")
-    group.add_argument("--wget", action="store_const", dest="strategy", const="wget",
-                       help="Use the wget strategy")
-    group.add_argument("--rust", action="store_const", dest="strategy", const="rust",
-                       help="Use the rust strategy (stub; not yet implemented)")
-    parser.add_argument("--strategy", dest="strategy",
-                        choices=["auto", "curl", "wget", "rust"],
-                        help="Explicit strategy (default: auto)")
-    parser.add_argument("--crypto-only", action="store_true",
-                        help="Only discover, log and verify the crypto config")
-    parser.add_argument("--no-verify-crypto", action="store_true",
-                        help="Do not refuse the download if crypto cannot be verified")
-    parser.add_argument("--overwrite", action="store_true",
-                        help="Overwrite an existing destination")
-    parser.add_argument("--sign", action="store_true",
-                        help="Write a DID-signed provenance sidecar (<dest>.prov.json)")
-    parser.add_argument("--cryptosuite", default=DEFAULT_CRYPTOSUITE,
-                        help="signing cryptosuite (default: %s)" % DEFAULT_CRYPTOSUITE)
-    parser.add_argument("--keys-dir",
-                        help="On-disk key directory if no did-agent is available")
-    parser.add_argument("--cache", action="store_true",
-                        help="Store the download in the central cache with a signed .meta.yml")
-    parser.add_argument("--cache-dir",
-                        help="Central cache directory (default: $XDG_CACHE_HOME/tert/fetch)")
-    parser.add_argument("--query", choices=["ls", "show"],
-                        help="Query cached metadata: 'ls' lists, 'show <path>' prints a .meta.yml")
-    parser.add_argument("--verify-file", metavar="PATH",
-                        help="Verify a provenance sidecar JSON file and exit")
-    parser.add_argument("--record", action=argparse.BooleanOptionalAction, default=True,
-                        help="Record this fetch in the replog and register the downloaded "
-                             "artifact (default: on; use --no-record to skip)")
-    parser.add_argument("--reports-dir", default="reports",
-                        help="Reports directory for recorded fetches")
-    parser.add_argument("--replog-db", default="reports/replog.db",
-                        help="Replog SQLite database path for recorded fetches")
-    parser.add_argument("--json", action="store_true",
-                        help="Emit the result as JSON")
+    group.add_argument(
+        "--curl",
+        action="store_const",
+        dest="strategy",
+        const="curl",
+        help="Use the curl strategy",
+    )
+    group.add_argument(
+        "--wget",
+        action="store_const",
+        dest="strategy",
+        const="wget",
+        help="Use the wget strategy",
+    )
+    group.add_argument(
+        "--rust",
+        action="store_const",
+        dest="strategy",
+        const="rust",
+        help="Use the rust strategy (stub; not yet implemented)",
+    )
+    parser.add_argument(
+        "--strategy",
+        dest="strategy",
+        choices=["auto", "curl", "wget", "rust"],
+        help="Explicit strategy (default: auto)",
+    )
+    parser.add_argument(
+        "--crypto-only",
+        action="store_true",
+        help="Only discover, log and verify the crypto config",
+    )
+    parser.add_argument(
+        "--no-verify-crypto",
+        action="store_true",
+        help="Do not refuse the download if crypto cannot be verified",
+    )
+    parser.add_argument(
+        "--overwrite", action="store_true", help="Overwrite an existing destination"
+    )
+    parser.add_argument(
+        "--sign",
+        action="store_true",
+        help="Write a DID-signed provenance sidecar (<dest>.prov.json)",
+    )
+    parser.add_argument(
+        "--cryptosuite",
+        default=DEFAULT_CRYPTOSUITE,
+        help="signing cryptosuite (default: %s)" % DEFAULT_CRYPTOSUITE,
+    )
+    parser.add_argument(
+        "--keys-dir", help="On-disk key directory if no did-agent is available"
+    )
+    parser.add_argument(
+        "--cache",
+        action="store_true",
+        help="Store the download in the central cache with a signed .meta.yml",
+    )
+    parser.add_argument(
+        "--cache-dir",
+        help="Central cache directory (default: $XDG_CACHE_HOME/tert/fetch)",
+    )
+    parser.add_argument(
+        "--query",
+        choices=["ls", "show"],
+        help="Query cached metadata: 'ls' lists, 'show <path>' prints a .meta.yml",
+    )
+    parser.add_argument(
+        "--verify-file",
+        metavar="PATH",
+        help="Verify a provenance sidecar JSON file and exit",
+    )
+    parser.add_argument(
+        "--record",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Record this fetch in the replog and register the downloaded "
+        "artifact (default: on; use --no-record to skip)",
+    )
+    parser.add_argument(
+        "--reports-dir",
+        default="reports",
+        help="Reports directory for recorded fetches",
+    )
+    parser.add_argument(
+        "--replog-db",
+        default="reports/replog.db",
+        help="Replog SQLite database path for recorded fetches",
+    )
+    parser.add_argument("--json", action="store_true", help="Emit the result as JSON")
     parser.add_argument("-v", "--verbose", action="store_true", help="Verbose logging")
     return parser
 
@@ -909,8 +976,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         log_crypto_config(cfg)
         ok, problems = verify_crypto_config(cfg)
         if args.json:
-            print(json.dumps({"crypto_config": cfg.to_dict(), "ok": ok,
-                              "problems": problems}, indent=2))
+            print(
+                json.dumps(
+                    {"crypto_config": cfg.to_dict(), "ok": ok, "problems": problems},
+                    indent=2,
+                )
+            )
         else:
             print("crypto verify: %s" % ("OK" if ok else "FAILED"))
             for problem in problems:

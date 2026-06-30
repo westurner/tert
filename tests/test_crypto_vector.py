@@ -5,6 +5,7 @@ BOTH this Python test and the Rust ``tert::crypto`` interop test, so the two
 implementations are checked against one identical data set. The Python values
 are independently validated against OpenSSL in test_crypto.py.
 """
+
 import json
 import os
 
@@ -44,7 +45,9 @@ def test_canonical_vector_constants():
     assert CANONICAL["seed_hex"] == (
         "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"
     )
-    assert CANONICAL["did"] == "did:key:z6MkneMkZqwqRiU5mJzSG3kDwzt9P8C59N4NGTfBLfSGE7c7"
+    assert (
+        CANONICAL["did"] == "did:key:z6MkneMkZqwqRiU5mJzSG3kDwzt9P8C59N4NGTfBLfSGE7c7"
+    )
     assert CANONICAL["pubkey_hex"] == (
         "79b5562e8fe654f94078b112e8a98ba7901f853ae695bed7e0e3910bad049664"
     )

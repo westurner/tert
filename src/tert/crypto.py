@@ -41,8 +41,8 @@ SIGNATURE_BYTES = 64
 # --- Ed25519 reference implementation (RFC 8032) ---------------------------
 
 _b = 256
-_q = 2 ** 255 - 19
-_l = 2 ** 252 + 27742317777372353535851937790883648493
+_q = 2**255 - 19
+_l = 2**252 + 27742317777372353535851937790883648493
 
 
 def _H(m: bytes) -> bytes:
@@ -106,12 +106,12 @@ def _bit(h: bytes, i: int) -> int:
 
 def _Hint(m: bytes) -> int:
     h = _H(m)
-    return sum(2 ** i * _bit(h, i) for i in range(2 * _b))
+    return sum(2**i * _bit(h, i) for i in range(2 * _b))
 
 
 def _secret_scalar(seed: bytes) -> int:
     h = _H(seed)
-    return 2 ** (_b - 2) + sum(2 ** i * _bit(h, i) for i in range(3, _b - 2))
+    return 2 ** (_b - 2) + sum(2**i * _bit(h, i) for i in range(3, _b - 2))
 
 
 def ed25519_publickey(seed: bytes) -> bytes:
@@ -131,7 +131,7 @@ def ed25519_sign(seed: bytes, msg: bytes, pubkey: bytes = None) -> bytes:
         pubkey = ed25519_publickey(seed)
     h = _H(seed)
     a = _secret_scalar(seed)
-    r = _Hint(h[_b // 8:_b // 4] + msg)
+    r = _Hint(h[_b // 8 : _b // 4] + msg)
     R = _scalarmult(_B, r)
     S = (r + _Hint(_encodepoint(R) + pubkey + msg) * a) % _l
     return _encodepoint(R) + _encodeint(S)
@@ -162,10 +162,10 @@ def ed25519_verify(pubkey: bytes, msg: bytes, sig: bytes) -> bool:
     if len(sig) != SIGNATURE_BYTES or len(pubkey) != PUBKEY_BYTES:
         return False
     try:
-        R = _decodepoint(sig[:_b // 8])
+        R = _decodepoint(sig[: _b // 8])
         A = _decodepoint(pubkey)
-        S = _decodeint(sig[_b // 8:_b // 4])
-        h = _Hint(sig[:_b // 8] + pubkey + msg)
+        S = _decodeint(sig[_b // 8 : _b // 4])
+        h = _Hint(sig[: _b // 8] + pubkey + msg)
         return _scalarmult(_B, S) == _edwards(R, _scalarmult(A, h))
     except (ValueError, IndexError):
         return False
@@ -229,10 +229,10 @@ def pubkey_from_did_key(did: str) -> bytes:
     """Extract the Ed25519 public key from a ``did:key`` identifier."""
     if not did.startswith("did:key:z"):
         raise ValueError("not an Ed25519 did:key: %r" % did)
-    raw = base58btc_decode(did[len("did:key:z"):])
+    raw = base58btc_decode(did[len("did:key:z") :])
     if not raw.startswith(_ED25519_MULTICODEC):
         raise ValueError("did:key is not Ed25519 (bad multicodec)")
-    pub = raw[len(_ED25519_MULTICODEC):]
+    pub = raw[len(_ED25519_MULTICODEC) :]
     if len(pub) != PUBKEY_BYTES:
         raise ValueError("did:key public key has wrong length")
     return pub

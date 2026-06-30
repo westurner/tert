@@ -18,7 +18,7 @@ def pytest_configure(config):
     """Register custom markers."""
     config.addinivalue_line(
         "markers",
-        "requires_mock: marks tests as requiring subprocess mocking (deselect with '-m \"not requires_mock\"')"
+        "requires_mock: marks tests as requiring subprocess mocking (deselect with '-m \"not requires_mock\"')",
     )
 
 
@@ -26,7 +26,7 @@ def pytest_configure(config):
 def mock_subprocess_globally():
     """
     Global subprocess mock that applies to all tests.
-    
+
     RECURSION PROTECTION:
     - Tests that call main() or actual subprocess operations must be marked with @pytest.mark.requires_mock
     - These tests must use mocking to prevent recursive pytest invocations
@@ -34,6 +34,7 @@ def mock_subprocess_globally():
     - run_tests.py checks this env var and refuses to run pytest
     """
     from unittest import mock
-    with mock.patch('subprocess.run') as mock_run:
+
+    with mock.patch("subprocess.run") as mock_run:
         mock_run.return_value = mock.Mock(returncode=0)
         yield mock_run

@@ -69,7 +69,7 @@ def build_artifact_summary(
             raise ValueError("only sha256 checksums are supported, got %r" % algo)
         subject["checksum_algorithm"] = algo
         subject["checksum_expected"] = expected
-        subject["checksum_verified"] = (digest == expected)
+        subject["checksum_verified"] = digest == expected
     return {
         "@context": ARTIFACT_CONTEXT,
         "type": ["VerifiableCredential", "prov:Entity"],

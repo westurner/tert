@@ -1,4 +1,5 @@
 """Pytest tests for tert.vc (Verifiable Credential signing)."""
+
 import copy
 import json
 
@@ -62,7 +63,11 @@ class TestCryptosuites:
             get_cryptosuite("nope")
 
     def test_registry_contents(self):
-        assert set(CRYPTOSUITES) == {"eddsa-jcs-2022", "mldsa-87-p256", "merkle-tree-certs"}
+        assert set(CRYPTOSUITES) == {
+            "eddsa-jcs-2022",
+            "mldsa-87-p256",
+            "merkle-tree-certs",
+        }
 
 
 class TestSignVerify:
@@ -148,6 +153,7 @@ class TestDocumentIO:
 
     def test_toml_uses_provisional_section(self, tmp_path, backend):
         from tert.vc import TOML_VC_SECTION
+
         signed = sign_document(SAMPLE_DOC, backend)
         text = dump_document(signed, "toml")
         assert text.startswith("[%s]" % TOML_VC_SECTION)
@@ -171,6 +177,7 @@ class TestDocumentIO:
 class TestCli:
     def test_sign_and_verify_via_cli(self, tmp_path, capsys):
         from tert.vc import main
+
         keys = tmp_path / "keys"
         doc_path = tmp_path / "doc.json"
         out_path = tmp_path / "signed.json"
@@ -184,6 +191,7 @@ class TestCli:
 
     def test_cryptosuites_listing(self, capsys):
         from tert.vc import main
+
         rc = main(["cryptosuites", "--json"])
         out = capsys.readouterr().out
         assert rc == 0
@@ -193,12 +201,23 @@ class TestCli:
 
     def test_sign_with_mldsa_cryptosuite_cli(self, tmp_path, capsys):
         from tert.vc import main
+
         keys = tmp_path / "keys"
         doc_path = tmp_path / "doc.json"
         out_path = tmp_path / "signed.json"
         doc_path.write_text(json.dumps(SAMPLE_DOC))
-        rc = main(["sign", str(doc_path), "--keys-dir", str(keys),
-                   "--cryptosuite", "mldsa-87-p256", "-o", str(out_path)])
+        rc = main(
+            [
+                "sign",
+                str(doc_path),
+                "--keys-dir",
+                str(keys),
+                "--cryptosuite",
+                "mldsa-87-p256",
+                "-o",
+                str(out_path),
+            ]
+        )
         assert rc == 0
         rc = main(["verify", str(out_path)])
         assert capsys.readouterr().out.strip().endswith("OK")

@@ -47,10 +47,12 @@ def _format_timestamp_ns(ns: int) -> str:
     secs = ns // 1_000_000_000
     nanos = ns % 1_000_000_000
     dt = datetime.fromtimestamp(secs, tz=timezone.utc)
-    return dt.strftime('%Y-%m-%dT%H:%M:%S') + f'.{nanos:09d}+00:00'
+    return dt.strftime("%Y-%m-%dT%H:%M:%S") + f".{nanos:09d}+00:00"
 
 
-def _interpreter_cmd(interpreter: str, args, command_flag: Optional[str] = "-c") -> List[str]:
+def _interpreter_cmd(
+    interpreter: str, args, command_flag: Optional[str] = "-c"
+) -> List[str]:
     """Build an argv for an interpreter (sh/bash/zsh/python/ipython).
 
     - No args: just the interpreter.
@@ -73,10 +75,10 @@ def _interpreter_cmd(interpreter: str, args, command_flag: Optional[str] = "-c")
     return [interpreter, command_flag, shlex.join(args)]
 
 
-
 @dataclass
 class TertTestRun:
     """Metadata for a single test run."""
+
     timestamp_ns: str
     epoch_ns: int
     exit_code: int
@@ -86,12 +88,12 @@ class TertTestRun:
 
 class ReplogDB:
     """SQLite replog database for storing test runs and artifacts."""
-    
+
     def __init__(self, db_path: Path):
         self.db_path = db_path
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._ensure_schema()
-    
+
     def _ensure_schema(self):
         """Create tables if they don't exist and migrate schema if needed."""
 
@@ -184,7 +186,9 @@ class ReplogDB:
                 PRIMARY KEY (epoch_ns, filename)
             )
         """)
-        con.execute("INSERT INTO schema_version (version, applied_at) VALUES (1, datetime('now'))")
+        con.execute(
+            "INSERT INTO schema_version (version, applied_at) VALUES (1, datetime('now'))"
+        )
         # FTS5 tables and triggers are added by _migrate_v6
 
     def _migrate_v2(self, con: "sqlite3.Connection") -> None:
@@ -201,14 +205,18 @@ class ReplogDB:
             con.execute("ALTER TABLE test_artifacts ADD COLUMN full_path TEXT")
         except sqlite3.OperationalError:
             pass
-        con.execute("UPDATE test_artifacts SET full_path = out_dir || '/' || filename WHERE full_path IS NULL")
-        con.execute("INSERT INTO schema_version (version, applied_at) VALUES (2, datetime('now'))")
+        con.execute(
+            "UPDATE test_artifacts SET full_path = out_dir || '/' || filename WHERE full_path IS NULL"
+        )
+        con.execute(
+            "INSERT INTO schema_version (version, applied_at) VALUES (2, datetime('now'))"
+        )
 
     def _migrate_v3(self, con: "sqlite3.Connection") -> None:
         """Upgrade epoch-keyed v1/v2 databases to v5 schema (epoch_ns PK, exit_code in artifacts)."""
         cursor = con.execute("PRAGMA table_info(test_runs)")
         columns = {row[1] for row in cursor.fetchall()}
-        if 'timestamp_ns' not in columns:
+        if "timestamp_ns" not in columns:
             # Disable FK enforcement during table reconstruction
             con.execute("PRAGMA foreign_keys = OFF")
             con.execute("ALTER TABLE test_artifacts RENAME TO test_artifacts_old")
@@ -256,13 +264,15 @@ class ReplogDB:
             con.execute("DROP TABLE test_artifacts_old")
             con.execute("DROP TABLE test_runs_old")
             con.execute("PRAGMA foreign_keys = ON")
-        con.execute("INSERT INTO schema_version (version, applied_at) VALUES (3, datetime('now'))")
+        con.execute(
+            "INSERT INTO schema_version (version, applied_at) VALUES (3, datetime('now'))"
+        )
 
     def _migrate_v4(self, con: "sqlite3.Connection") -> None:
         """Upgrade v3 databases (timestamp_ns PK, epoch seconds): convert to v5 schema with epoch_ns PK."""
         cursor = con.execute("PRAGMA table_info(test_runs)")
         columns = {row[1] for row in cursor.fetchall()}
-        if 'epoch_ns' not in columns:
+        if "epoch_ns" not in columns:
             con.execute("PRAGMA foreign_keys = OFF")
             con.execute("ALTER TABLE test_artifacts RENAME TO test_artifacts_old")
             con.execute("ALTER TABLE test_runs RENAME TO test_runs_old")
@@ -307,14 +317,16 @@ class ReplogDB:
             con.execute("DROP TABLE test_artifacts_old")
             con.execute("DROP TABLE test_runs_old")
             con.execute("PRAGMA foreign_keys = ON")
-        con.execute("INSERT INTO schema_version (version, applied_at) VALUES (4, datetime('now'))")
+        con.execute(
+            "INSERT INTO schema_version (version, applied_at) VALUES (4, datetime('now'))"
+        )
 
     def _migrate_v5(self, con: "sqlite3.Connection") -> None:
         """Upgrade v4 databases (timestamp_ns PK, epoch_ns INTEGER): make epoch_ns PK, add exit_code to artifacts."""
         # Detect by checking if epoch_ns is the primary key in test_runs
         cursor = con.execute("PRAGMA table_info(test_runs)")
         rows = cursor.fetchall()
-        epoch_ns_is_pk = any(row[1] == 'epoch_ns' and row[5] == 1 for row in rows)
+        epoch_ns_is_pk = any(row[1] == "epoch_ns" and row[5] == 1 for row in rows)
         if not epoch_ns_is_pk:
             con.execute("PRAGMA foreign_keys = OFF")
             con.execute("ALTER TABLE test_artifacts RENAME TO test_artifacts_old")
@@ -360,12 +372,16 @@ class ReplogDB:
             con.execute("DROP TABLE test_artifacts_old")
             con.execute("DROP TABLE test_runs_old")
             con.execute("PRAGMA foreign_keys = ON")
-        con.execute("INSERT INTO schema_version (version, applied_at) VALUES (5, datetime('now'))")
+        con.execute(
+            "INSERT INTO schema_version (version, applied_at) VALUES (5, datetime('now'))"
+        )
 
     def _migrate_v6(self, con: "sqlite3.Connection") -> None:
         """Add FTS5 content tables and sync triggers for Datasette auto-detection."""
         self._setup_fts_content_tables(con)
-        con.execute("INSERT INTO schema_version (version, applied_at) VALUES (6, datetime('now'))")
+        con.execute(
+            "INSERT INTO schema_version (version, applied_at) VALUES (6, datetime('now'))"
+        )
 
     def _migrate_v8(self, con: "sqlite3.Connection") -> None:
         """Rebuild FTS as content tables so Datasette auto-detects them.
@@ -377,13 +393,21 @@ class ReplogDB:
         For test_artifacts (composite PK), FTS uses the table's internal rowid.
         """
         # Drop old standalone FTS tables and triggers
-        for name in ('test_runs_fts', 'test_artifacts_fts'):
+        for name in ("test_runs_fts", "test_artifacts_fts"):
             con.execute(f"DROP TABLE IF EXISTS {name}")
-        for t in ('test_runs_ai', 'test_runs_ad', 'test_runs_au',
-                  'test_artifacts_ai', 'test_artifacts_ad', 'test_artifacts_au'):
+        for t in (
+            "test_runs_ai",
+            "test_runs_ad",
+            "test_runs_au",
+            "test_artifacts_ai",
+            "test_artifacts_ad",
+            "test_artifacts_au",
+        ):
             con.execute(f"DROP TRIGGER IF EXISTS {t}")
         self._setup_fts_content_tables(con)
-        con.execute("INSERT INTO schema_version (version, applied_at) VALUES (8, datetime('now'))")
+        con.execute(
+            "INSERT INTO schema_version (version, applied_at) VALUES (8, datetime('now'))"
+        )
 
     def _setup_fts_content_tables(self, con: "sqlite3.Connection") -> None:
         """Create FTS5 content tables, populate them, and install sync triggers.
@@ -468,12 +492,18 @@ class ReplogDB:
         cursor = con.execute("PRAGMA table_info(test_runs)")
         rows = cursor.fetchall()
         col_order = {row[1]: row[0] for row in rows}
-        if col_order.get('exit_code', 2) > col_order.get('command', 1):
+        if col_order.get("exit_code", 2) > col_order.get("command", 1):
             # Drop FTS tables and triggers before renaming base tables
-            for name in ('test_runs_fts', 'test_artifacts_fts'):
+            for name in ("test_runs_fts", "test_artifacts_fts"):
                 con.execute(f"DROP TABLE IF EXISTS {name}")
-            for t in ('test_runs_ai', 'test_runs_ad', 'test_runs_au',
-                      'test_artifacts_ai', 'test_artifacts_ad', 'test_artifacts_au'):
+            for t in (
+                "test_runs_ai",
+                "test_runs_ad",
+                "test_runs_au",
+                "test_artifacts_ai",
+                "test_artifacts_ad",
+                "test_artifacts_au",
+            ):
                 con.execute(f"DROP TRIGGER IF EXISTS {t}")
             con.execute("ALTER TABLE test_artifacts RENAME TO test_artifacts_old")
             con.execute("ALTER TABLE test_runs RENAME TO test_runs_old")
@@ -513,27 +543,55 @@ class ReplogDB:
             con.execute("DROP TABLE test_runs_old")
             # Recreate FTS tables and triggers inline (no schema_version insert)
             self._setup_fts_content_tables(con)
-        con.execute("INSERT INTO schema_version (version, applied_at) VALUES (7, datetime('now'))")
+        con.execute(
+            "INSERT INTO schema_version (version, applied_at) VALUES (7, datetime('now'))"
+        )
 
     def insert_run(self, run: TertTestRun):
         """Store a test run record."""
         with sqlite3.connect(self.db_path) as con:
             sql = "INSERT OR REPLACE INTO test_runs (epoch_ns, exit_code, command, out_dir, timestamp_ns) VALUES (?, ?, ?, ?, ?)"
-            params = (run.epoch_ns, run.exit_code, run.command, str(run.out_dir), run.timestamp_ns)
+            params = (
+                run.epoch_ns,
+                run.exit_code,
+                run.command,
+                str(run.out_dir),
+                run.timestamp_ns,
+            )
             logger.debug(f"SQL: {sql} with params {params}")
             con.execute(sql, params)
             con.commit()
-    
-    def insert_artifact(self, epoch_ns: int, timestamp_ns: str, out_dir: Path, filename: str, content: str, command: str = "", exit_code: int = 0):
+
+    def insert_artifact(
+        self,
+        epoch_ns: int,
+        timestamp_ns: str,
+        out_dir: Path,
+        filename: str,
+        content: str,
+        command: str = "",
+        exit_code: int = 0,
+    ):
         """Store a build artifact linked to a test run by epoch_ns."""
         full_path = str(out_dir / filename)
         with sqlite3.connect(self.db_path) as con:
             sql = "INSERT OR REPLACE INTO test_artifacts (epoch_ns, exit_code, command, filename, content, out_dir, timestamp_ns, full_path) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
-            params = (epoch_ns, exit_code, command, filename, content, str(out_dir), timestamp_ns, full_path)
-            logger.debug(f"SQL: {sql} with params (epoch_ns={epoch_ns}, command={command}, exit_code={exit_code}, filename={filename}, content_len={len(content)}, out_dir={out_dir})")
+            params = (
+                epoch_ns,
+                exit_code,
+                command,
+                filename,
+                content,
+                str(out_dir),
+                timestamp_ns,
+                full_path,
+            )
+            logger.debug(
+                f"SQL: {sql} with params (epoch_ns={epoch_ns}, command={command}, exit_code={exit_code}, filename={filename}, content_len={len(content)}, out_dir={out_dir})"
+            )
             con.execute(sql, params)
             con.commit()
-    
+
     def query_runs(self, limit: int = 100) -> List[Dict[str, Any]]:
         """Get recent test runs, ordered by epoch_ns descending."""
         with sqlite3.connect(self.db_path) as con:
@@ -542,15 +600,15 @@ class ReplogDB:
             rows = con.execute(sql, (limit,)).fetchall()
             return [
                 {
-                    'epoch_ns': row[0],
-                    'exit_code': row[1],
-                    'command': row[2],
-                    'out_dir': row[3],
-                    'timestamp_ns': row[4],
+                    "epoch_ns": row[0],
+                    "exit_code": row[1],
+                    "command": row[2],
+                    "out_dir": row[3],
+                    "timestamp_ns": row[4],
                 }
                 for row in rows
             ]
-    
+
     def query_artifacts(self, out_dir: Optional[str] = None) -> List[Dict[str, Any]]:
         """List stored artifacts, ordered by epoch_ns descending."""
         query = "SELECT epoch_ns, exit_code, command, filename, length(content) as bytes, out_dir, timestamp_ns FROM test_artifacts"
@@ -566,13 +624,13 @@ class ReplogDB:
             rows = con.execute(query, params).fetchall()
             return [
                 {
-                    'epoch_ns': row[0],
-                    'exit_code': row[1],
-                    'command': row[2],
-                    'filename': row[3],
-                    'bytes': row[4],
-                    'out_dir': row[5],
-                    'timestamp_ns': row[6],
+                    "epoch_ns": row[0],
+                    "exit_code": row[1],
+                    "command": row[2],
+                    "filename": row[3],
+                    "bytes": row[4],
+                    "out_dir": row[5],
+                    "timestamp_ns": row[6],
                 }
                 for row in rows
             ]
@@ -580,7 +638,7 @@ class ReplogDB:
 
 class TertTestRunner:
     """Base test runner."""
-    
+
     def __init__(self, out_dir: Path):
         self.out_dir = out_dir
         self.out_dir.mkdir(parents=True, exist_ok=True)
@@ -589,14 +647,14 @@ class TertTestRunner:
             log_file=str(self.build_log),
             log_file_ansi=str(self.out_dir / "build.log.ansi"),
             keep_ansi=True,
-            color_mode='always'
+            color_mode="always",
         )
         self.artifacts: List[Path] = [self.build_log]
-    
+
     def run(self, *args) -> int:
         """Execute the test command; return exit code."""
         raise NotImplementedError
-    
+
     def get_artifacts(self) -> List[Path]:
         """Return list of artifact files to store in replog."""
         return [p for p in self.artifacts if p.exists()]
@@ -604,23 +662,27 @@ class TertTestRunner:
 
 class PytestRunner(TertTestRunner):
     """pytest test runner."""
-    
+
     def __init__(self, out_dir: Path):
         super().__init__(out_dir)
-        self.artifacts.extend([
-            self.out_dir / "pytest-results.xml",
-            self.out_dir / "coverage.json",
-        ])
-    
+        self.artifacts.extend(
+            [
+                self.out_dir / "pytest-results.xml",
+                self.out_dir / "coverage.json",
+            ]
+        )
+
     def run(self, *args) -> int:
         """Run pytest with Shellwrap for colored output."""
         original_env = os.environ.copy()
         os.environ["SKIP_PYTEST_REPLOG"] = "1"
         os.environ["COVERAGE_FILE"] = str(self.out_dir / ".coverage")
-        
+
         try:
             cmd = [
-                sys.executable, "-m", "pytest",
+                sys.executable,
+                "-m",
+                "pytest",
                 f"--junitxml={self.out_dir}/pytest-results.xml",
                 f"--cov-report=json:{self.out_dir}/coverage.json",
                 "--cov-report=term-missing:skip-covered",
@@ -628,7 +690,7 @@ class PytestRunner(TertTestRunner):
             cmd.extend(args)
 
             self.shellwrap.set_color_env()
-            self.shellwrap.commands = [' '.join(cmd)]
+            self.shellwrap.commands = [" ".join(cmd)]
             exit_code = self.shellwrap.execute_streaming()
             return exit_code
         finally:
@@ -638,84 +700,86 @@ class PytestRunner(TertTestRunner):
 
 class CargoRunner(TertTestRunner):
     """cargo test runner."""
-    
+
     def run(self, *args) -> int:
         """Run cargo test with Shellwrap for colored output."""
         cmd = ["cargo", "test"] + list(args)
 
         self.shellwrap.set_color_env()
-        self.shellwrap.commands = [' '.join(cmd)]
+        self.shellwrap.commands = [" ".join(cmd)]
         return self.shellwrap.execute_streaming()
 
 
 class GoRunner(TertTestRunner):
     """go test runner."""
-    
+
     def run(self, *args) -> int:
         """Run go test with Shellwrap for colored output."""
         cmd = ["go", "test"] + list(args)
 
         self.shellwrap.set_color_env()
-        self.shellwrap.commands = [' '.join(cmd)]
+        self.shellwrap.commands = [" ".join(cmd)]
         return self.shellwrap.execute_streaming()
 
 
 class JestRunner(TertTestRunner):
     """jest test runner."""
-    
+
     def run(self, *args) -> int:
         """Run jest with Shellwrap for colored output."""
         cmd = ["npx", "jest"] + list(args)
 
         self.shellwrap.set_color_env()
-        self.shellwrap.commands = [' '.join(cmd)]
+        self.shellwrap.commands = [" ".join(cmd)]
         return self.shellwrap.execute_streaming()
 
 
 class VitestRunner(TertTestRunner):
     """vitest test runner."""
-    
+
     def __init__(self, out_dir: Path):
         super().__init__(out_dir)
         self.artifacts.append(self.out_dir / "junit.xml")
-    
+
     def run(self, *args) -> int:
         """Run vitest with Shellwrap for colored output."""
         cmd = [
-            "npx", "vitest", "run",
+            "npx",
+            "vitest",
+            "run",
             "--reporter=junit",
             f"--outputFile={self.out_dir}/junit.xml",
         ] + list(args)
 
         self.shellwrap.set_color_env()
-        self.shellwrap.commands = [' '.join(cmd)]
+        self.shellwrap.commands = [" ".join(cmd)]
         return self.shellwrap.execute_streaming()
 
 
 class ToxRunner(TertTestRunner):
     """tox test runner."""
-    
+
     def run(self, *args) -> int:
         """Run tox with Shellwrap for colored output."""
         cmd = ["tox"] + list(args)
 
         self.shellwrap.set_color_env()
-        self.shellwrap.commands = [' '.join(cmd)]
+        self.shellwrap.commands = [" ".join(cmd)]
         return self.shellwrap.execute_streaming()
 
 
 class BashcovRunner(TertTestRunner):
     """bashcov test runner for bash script coverage."""
-    
+
     def run(self, *args) -> int:
         """Run bashcov if available."""
         try:
             cmd = ["bashcov"] + list(args)
 
             self.shellwrap.set_color_env()
-            self.shellwrap.commands = [' '.join(cmd)]
+            self.shellwrap.commands = [" ".join(cmd)]
             exit_code = self.shellwrap.execute_streaming()
-            
+
             # Store coverage results if available
             try:
                 coverage_file = self.out_dir / "bashcov-results.txt"
@@ -723,7 +787,7 @@ class BashcovRunner(TertTestRunner):
                     self.artifacts.append(coverage_file)
             except Exception:
                 pass
-            
+
             return exit_code
         except FileNotFoundError:
             logger.error("bashcov not found. Install with: pip install bashcov")
@@ -732,7 +796,7 @@ class BashcovRunner(TertTestRunner):
 
 class ShellcovRunner(TertTestRunner):
     """shellcov test runner (bash coverage wrapper, mimics bashcov output)."""
-    
+
     def run(self, *args) -> int:
         """Run shellcov if available, fallback to bash."""
         try:
@@ -740,9 +804,9 @@ class ShellcovRunner(TertTestRunner):
             cmd = ["shellcov"] + list(args)
 
             self.shellwrap.set_color_env()
-            self.shellwrap.commands = [' '.join(cmd)]
+            self.shellwrap.commands = [" ".join(cmd)]
             exit_code = self.shellwrap.execute_streaming()
-            
+
             # Store coverage results if available
             try:
                 coverage_file = self.out_dir / "shellcov-results.txt"
@@ -750,7 +814,7 @@ class ShellcovRunner(TertTestRunner):
                     self.artifacts.append(coverage_file)
             except Exception:
                 pass
-            
+
             return exit_code
         except FileNotFoundError:
             # Fallback to bash if shellcov not found
@@ -758,7 +822,7 @@ class ShellcovRunner(TertTestRunner):
             cmd = ["bash"] + list(args)
 
             self.shellwrap.set_color_env()
-            self.shellwrap.commands = [' '.join(cmd)]
+            self.shellwrap.commands = [" ".join(cmd)]
             return self.shellwrap.execute_streaming()
 
 
@@ -963,7 +1027,9 @@ def run_tests(
     input_checksums = input_checksums or []
     for i, input_path in enumerate(inputs):
         checksum = input_checksums[i] if i < len(input_checksums) else None
-        summary = _artifacts.build_artifact_summary(input_path, role="input", checksum=checksum)
+        summary = _artifacts.build_artifact_summary(
+            input_path, role="input", checksum=checksum
+        )
         if summary["credentialSubject"].get("checksum_verified") is False:
             logger.error("input checksum mismatch for %s", input_path)
             return 3
@@ -998,9 +1064,19 @@ def run_tests(
         for artifact_path in test_runner.get_artifacts():
             if artifact_path.exists():
                 content = artifact_path.read_text(errors="replace")
-                replog_db.insert_artifact(epoch_ns, timestamp_ns, out_dir, artifact_path.name, content, command, exit_code)
+                replog_db.insert_artifact(
+                    epoch_ns,
+                    timestamp_ns,
+                    out_dir,
+                    artifact_path.name,
+                    content,
+                    command,
+                    exit_code,
+                )
                 # Output artifact summary (YAML-LD/PROV), printed and stored.
-                summary = _artifacts.build_artifact_summary(str(artifact_path), role="output")
+                summary = _artifacts.build_artifact_summary(
+                    str(artifact_path), role="output"
+                )
                 summary = _artifacts.maybe_sign(summary, backend, cryptosuite)
                 _artifacts.write_summary(summary, str(summaries_dir))
                 print(_artifacts.summary_text(summary, "yaml"))
@@ -1053,15 +1129,19 @@ def record_run(
     except OSError:
         pass
 
-    replog_db.insert_run(TertTestRun(
-        timestamp_ns=timestamp_ns,
-        epoch_ns=epoch_ns,
-        exit_code=exit_code,
-        out_dir=out_dir,
-        command=command,
-    ))
+    replog_db.insert_run(
+        TertTestRun(
+            timestamp_ns=timestamp_ns,
+            epoch_ns=epoch_ns,
+            exit_code=exit_code,
+            out_dir=out_dir,
+            command=command,
+        )
+    )
 
-    backend = resolve_key_backend(keys_dir=keys_dir, log=logger) if summary_sign else None
+    backend = (
+        resolve_key_backend(keys_dir=keys_dir, log=logger) if summary_sign else None
+    )
 
     for artifact_path in [build_log] + paths:
         if not artifact_path.exists():
@@ -1071,7 +1151,13 @@ def record_run(
         except OSError:
             content = ""
         replog_db.insert_artifact(
-            epoch_ns, timestamp_ns, out_dir, artifact_path.name, content, command, exit_code
+            epoch_ns,
+            timestamp_ns,
+            out_dir,
+            artifact_path.name,
+            content,
+            command,
+            exit_code,
         )
         summary = _artifacts.build_artifact_summary(str(artifact_path), role="output")
         summary = _artifacts.maybe_sign(summary, backend, cryptosuite)
@@ -1090,11 +1176,13 @@ def query_artifacts(replog_db: ReplogDB, out_dir: Optional[str] = None) -> List[
     return replog_db.query_artifacts(out_dir)
 
 
-def query_coverage_lines(coverage_db: Path, filter_path: Optional[str] = None) -> Dict[str, List[int]]:
+def query_coverage_lines(
+    coverage_db: Path, filter_path: Optional[str] = None
+) -> Dict[str, List[int]]:
     """Decode coverage.py line_bits and return covered lines per file."""
     if not coverage_db.exists():
         raise FileNotFoundError(f".coverage DB not found: {coverage_db}")
-    
+
     def numbits_to_lines(blob: bytes) -> List[int]:
         lines = []
         for byte_i, byte in enumerate(blob):
@@ -1102,7 +1190,7 @@ def query_coverage_lines(coverage_db: Path, filter_path: Optional[str] = None) -
                 if byte & (1 << bit_j):
                     lines.append(byte_i * 8 + bit_j + 1)
         return lines
-    
+
     result = {}
     with sqlite3.connect(coverage_db) as con:
         con.row_factory = sqlite3.Row
@@ -1112,49 +1200,83 @@ def query_coverage_lines(coverage_db: Path, filter_path: Optional[str] = None) -
             query += " WHERE f.path LIKE ?"
             params.append(f"%{filter_path}%")
         query += " ORDER BY f.path"
-        
+
         logger.debug(f"SQL: {query} with params {params}")
         rows = con.execute(query, params).fetchall()
         for row in rows:
             result[row["path"]] = numbits_to_lines(row["numbits"])
-    
+
     return result
 
 
 def main():
     """CLI entry point."""
     if os.environ.get("PYTEST_RUNNING") == "1":
-        print("Error: Cannot run run_tests from within pytest (recursion protection)", file=sys.stderr)
-        print("       Tests must use mocking instead of calling main()", file=sys.stderr)
+        print(
+            "Error: Cannot run run_tests from within pytest (recursion protection)",
+            file=sys.stderr,
+        )
+        print(
+            "       Tests must use mocking instead of calling main()", file=sys.stderr
+        )
         return 1
 
     # The ``fetch`` subcommand has its own argument parser; delegate to it before
     # the test-runner argv preprocessing below.
     if sys.argv[1:2] == ["fetch"]:
         from .fetch import main as fetch_main
+
         return fetch_main(sys.argv[2:])
 
     # The ``did-agent`` subcommand (ssh-agent-style Ed25519 signer) likewise has
     # its own parser.
     if sys.argv[1:2] == ["did-agent"]:
         from .did_agent import main as did_agent_main
+
         return did_agent_main(sys.argv[2:])
 
     # The ``vc`` subcommand signs/verifies Verifiable Credential documents.
     if sys.argv[1:2] == ["vc"]:
         from .vc import main as vc_main
+
         return vc_main(sys.argv[2:])
 
-    known_runners = ["pytest", "cargo", "go", "jest", "vitest", "tox", "sh", "bash", "zsh", "python", "ipython", "fetch"]
+    known_runners = [
+        "pytest",
+        "cargo",
+        "go",
+        "jest",
+        "vitest",
+        "tox",
+        "sh",
+        "bash",
+        "zsh",
+        "python",
+        "ipython",
+        "fetch",
+    ]
     known_commands = ["run", "ls", "show", "query", "fetch", "did-agent", "vc"]
     command_aliases = {"q": "query", "l": "ls", "s": "show"}
-    subquery_aliases = {"l": "lines", "a": "artifacts", "r": "runs", "lines": "coverage-lines"}
-    subquery_normalized = {"coverage-lines": "coverage-lines", "lines": "coverage-lines"}
-    
+    subquery_aliases = {
+        "l": "lines",
+        "a": "artifacts",
+        "r": "runs",
+        "lines": "coverage-lines",
+    }
+    subquery_normalized = {
+        "coverage-lines": "coverage-lines",
+        "lines": "coverage-lines",
+    }
+
     argv = sys.argv[1:]
-    
-    if (argv and len(argv[0]) > 1 and not argv[0].startswith("-")
-            and argv[0] not in known_runners and argv[0] not in known_commands):
+
+    if (
+        argv
+        and len(argv[0]) > 1
+        and not argv[0].startswith("-")
+        and argv[0] not in known_runners
+        and argv[0] not in known_commands
+    ):
         first_arg = argv[0]
         if first_arg[0] in command_aliases:
             cmd_alias = first_arg[0]
@@ -1162,16 +1284,16 @@ def main():
             argv[0] = command_aliases[cmd_alias]
             if remainder and remainder in subquery_aliases:
                 argv.insert(1, subquery_aliases[remainder])
-    
+
     if argv and argv[0] in command_aliases:
         argv[0] = command_aliases[argv[0]]
-    
+
     if len(argv) >= 2 and argv[0] == "query":
         if argv[1] in subquery_aliases:
             argv[1] = subquery_aliases[argv[1]]
         if argv[1] in subquery_normalized:
             argv[1] = subquery_normalized[argv[1]]
-    
+
     if argv and argv[0] not in known_commands:
         if argv[0] in known_runners:
             argv.insert(0, "run")
@@ -1179,60 +1301,138 @@ def main():
             argv.insert(0, "run")
     elif not argv:
         argv.insert(0, "run")
-    
+
     parser = argparse.ArgumentParser(
         description="Test runner with timestamped reports and SQLite replog"
     )
-    parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose output")
+    parser.add_argument(
+        "-v", "--verbose", action="store_true", help="Enable verbose output"
+    )
     subparsers = parser.add_subparsers(dest="command")
-    
+
     run_parser = subparsers.add_parser("run", help="Run tests")
-    run_parser.add_argument("--runner", default="pytest", choices=["pytest", "cargo", "go", "jest", "vitest", "tox", "sh", "bash", "zsh", "python", "ipython", "fetch"], help="Test runner to use")
-    run_parser.add_argument("--reports-dir", type=Path, default=Path("reports"), help="Reports directory")
-    run_parser.add_argument("--replog-db", type=Path, default=Path("reports/replog.db"), help="Replog SQLite database path")
-    run_parser.add_argument("--no-artifacts", action="store_true", help="Skip storing artifacts")
-    run_parser.add_argument("--input", action="append", default=[], dest="inputs",
-                            metavar="FILE", help="Input artifact file (repeatable)")
-    run_parser.add_argument("--input-checksum", action="append", default=[], dest="input_checksums",
-                            metavar="sha256:HEX", help="Expected checksum for the matching --input")
-    run_parser.add_argument("--summary-sign", action="store_true",
-                            help="DID-sign artifact summaries")
-    run_parser.add_argument("--keys-dir", help="On-disk key directory for signing summaries")
-    run_parser.add_argument("--cryptosuite", default="eddsa-jcs-2022",
-                            help="Cryptosuite for signed summaries (default: eddsa-jcs-2022)")
-    run_parser.add_argument("runner_args", nargs="*", help="Arguments to pass to the test runner or path to tests")
-    
+    run_parser.add_argument(
+        "--runner",
+        default="pytest",
+        choices=[
+            "pytest",
+            "cargo",
+            "go",
+            "jest",
+            "vitest",
+            "tox",
+            "sh",
+            "bash",
+            "zsh",
+            "python",
+            "ipython",
+            "fetch",
+        ],
+        help="Test runner to use",
+    )
+    run_parser.add_argument(
+        "--reports-dir", type=Path, default=Path("reports"), help="Reports directory"
+    )
+    run_parser.add_argument(
+        "--replog-db",
+        type=Path,
+        default=Path("reports/replog.db"),
+        help="Replog SQLite database path",
+    )
+    run_parser.add_argument(
+        "--no-artifacts", action="store_true", help="Skip storing artifacts"
+    )
+    run_parser.add_argument(
+        "--input",
+        action="append",
+        default=[],
+        dest="inputs",
+        metavar="FILE",
+        help="Input artifact file (repeatable)",
+    )
+    run_parser.add_argument(
+        "--input-checksum",
+        action="append",
+        default=[],
+        dest="input_checksums",
+        metavar="sha256:HEX",
+        help="Expected checksum for the matching --input",
+    )
+    run_parser.add_argument(
+        "--summary-sign", action="store_true", help="DID-sign artifact summaries"
+    )
+    run_parser.add_argument(
+        "--keys-dir", help="On-disk key directory for signing summaries"
+    )
+    run_parser.add_argument(
+        "--cryptosuite",
+        default="eddsa-jcs-2022",
+        help="Cryptosuite for signed summaries (default: eddsa-jcs-2022)",
+    )
+    run_parser.add_argument(
+        "runner_args",
+        nargs="*",
+        help="Arguments to pass to the test runner or path to tests",
+    )
+
     ls_parser = subparsers.add_parser("ls", help="List reports")
     ls_parser.add_argument("ls_args", nargs="*", help="Arguments to ls")
-    
+
     show_parser = subparsers.add_parser("show", help="Show report")
-    show_parser.add_argument("reportdir", nargs="?", default="reports/latest", help="Report directory")
-    
+    show_parser.add_argument(
+        "reportdir", nargs="?", default="reports/latest", help="Report directory"
+    )
+
     query_parser = subparsers.add_parser("query", help="Query replog")
-    query_parser.add_argument("subquery", choices=["runs", "r", "artifacts", "a", "coverage-lines", "lines", "l", "artifact-summaries", "summaries"], help="Query type")
-    query_parser.add_argument("--replog-db", type=Path, default=Path("reports/replog.db"), help="Replog SQLite database path")
-    query_parser.add_argument("--jsonl", "--nl", action="store_true", help="Output as JSON Lines")
+    query_parser.add_argument(
+        "subquery",
+        choices=[
+            "runs",
+            "r",
+            "artifacts",
+            "a",
+            "coverage-lines",
+            "lines",
+            "l",
+            "artifact-summaries",
+            "summaries",
+        ],
+        help="Query type",
+    )
+    query_parser.add_argument(
+        "--replog-db",
+        type=Path,
+        default=Path("reports/replog.db"),
+        help="Replog SQLite database path",
+    )
+    query_parser.add_argument(
+        "--jsonl", "--nl", action="store_true", help="Output as JSON Lines"
+    )
     query_parser.add_argument("query_args", nargs="*", help="Query arguments")
-    
+
     args, unknown = parser.parse_known_args(argv)
-    
+
     if args.verbose:
         logger.setLevel(logging.DEBUG)
     else:
         logger.setLevel(logging.WARNING)
-    
+
     if args.command == "run":
         runner = args.runner
         runner_args = list(args.runner_args) if args.runner_args else []
         runner_args.extend(unknown)
-        
+
         if runner_args and runner_args[0] in known_runners:
             runner = runner_args[0]
             runner_args = runner_args[1:]
-        
+
         replog_db = ReplogDB(args.replog_db)
         exit_code = run_tests(
-            runner, args.reports_dir, replog_db, args.no_artifacts, *runner_args,
+            runner,
+            args.reports_dir,
+            replog_db,
+            args.no_artifacts,
+            *runner_args,
             inputs=args.inputs,
             input_checksums=args.input_checksums,
             summary_sign=args.summary_sign,
@@ -1240,23 +1440,29 @@ def main():
             cryptosuite=args.cryptosuite,
         )
         return exit_code
-    
+
     elif args.command == "ls":
         _run_command(["ls", "-al", "reports"] + args.ls_args)
-    
+
     elif args.command == "show":
         report_dir = Path(args.reportdir)
         for file in sorted(report_dir.glob("*")):
             if file.is_file():
                 print(f"\n===== {file.name} =====")
                 print(file.read_text(errors="replace"))
-    
+
     elif args.command == "query":
         replog_db = ReplogDB(args.replog_db)
-        
-        subquery_map = {"r": "runs", "a": "artifacts", "l": "coverage-lines", "lines": "coverage-lines", "summaries": "artifact-summaries"}
+
+        subquery_map = {
+            "r": "runs",
+            "a": "artifacts",
+            "l": "coverage-lines",
+            "lines": "coverage-lines",
+            "summaries": "artifact-summaries",
+        }
         subquery = subquery_map.get(args.subquery, args.subquery)
-        
+
         if subquery == "runs":
             runs = query_runs(replog_db)
             if args.jsonl:
@@ -1264,7 +1470,7 @@ def main():
                     print(json.dumps(run))
             else:
                 print(json.dumps(runs, indent=2))
-        
+
         elif subquery == "artifacts":
             artifacts = query_artifacts(replog_db)
             if args.jsonl:
@@ -1272,9 +1478,11 @@ def main():
                     print(json.dumps(artifact))
             else:
                 print(json.dumps(artifacts, indent=2))
-        
+
         elif subquery == "coverage-lines":
-            reportdir = Path(args.query_args[0] if args.query_args else "reports/latest")
+            reportdir = Path(
+                args.query_args[0] if args.query_args else "reports/latest"
+            )
             filter_path = args.query_args[1] if len(args.query_args) > 1 else None
             coverage_db = reportdir / ".coverage"
             if not coverage_db.exists():
@@ -1289,7 +1497,10 @@ def main():
 
         elif subquery == "artifact-summaries":
             from . import artifacts as _artifacts
-            reportdir = Path(args.query_args[0] if args.query_args else "reports/latest")
+
+            reportdir = Path(
+                args.query_args[0] if args.query_args else "reports/latest"
+            )
             summaries_dir = reportdir / "artifacts"
             rows = []
             for path, doc in _artifacts.iter_summaries(str(summaries_dir)):
@@ -1302,7 +1513,7 @@ def main():
                     print(json.dumps(row))
             else:
                 print(json.dumps(rows, indent=2))
-    
+
     return 0
 
 

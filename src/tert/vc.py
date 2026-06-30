@@ -278,8 +278,7 @@ class MerkleTreeCerts(Cryptosuite):
 
 
 CRYPTOSUITES: Dict[str, Cryptosuite] = {
-    suite.name: suite
-    for suite in (EddsaJcs2022(), MldsaP256(), MerkleTreeCerts())
+    suite.name: suite for suite in (EddsaJcs2022(), MldsaP256(), MerkleTreeCerts())
 }
 
 
@@ -288,7 +287,8 @@ def get_cryptosuite(name: str) -> Cryptosuite:
         return CRYPTOSUITES[name]
     except KeyError:
         raise CryptosuiteError(
-            "unknown cryptosuite: %s (known: %s)" % (name, ", ".join(sorted(CRYPTOSUITES)))
+            "unknown cryptosuite: %s (known: %s)"
+            % (name, ", ".join(sorted(CRYPTOSUITES)))
         )
 
 
@@ -316,7 +316,7 @@ def sign_document(
         "cryptosuite": suite.name,
         "created": created or utc_now_iso(),
         "proofPurpose": "assertionMethod",
-        "verificationMethod": did + "#" + did[len("did:key:"):],
+        "verificationMethod": did + "#" + did[len("did:key:") :],
         "proofValue": proof_value,
     }
     return out
@@ -373,9 +373,7 @@ def _toml_escape_str(value: str) -> str:
         .replace("\r", "\\r")
         .replace("\t", "\\t")
     )
-    return '"' + "".join(
-        c if ord(c) >= 0x20 else "\\u%04x" % ord(c) for c in out
-    ) + '"'
+    return '"' + "".join(c if ord(c) >= 0x20 else "\\u%04x" % ord(c) for c in out) + '"'
 
 
 def _toml_key(key: str) -> str:
@@ -464,11 +462,16 @@ def build_parser() -> argparse.ArgumentParser:
 
     sign_p = sub.add_parser("sign", help="Sign a VC document")
     sign_p.add_argument("file", help="JSON, YAML or TOML document to sign")
-    sign_p.add_argument("--cryptosuite", default=DEFAULT_CRYPTOSUITE,
-                        help="cryptosuite (default: %s)" % DEFAULT_CRYPTOSUITE)
+    sign_p.add_argument(
+        "--cryptosuite",
+        default=DEFAULT_CRYPTOSUITE,
+        help="cryptosuite (default: %s)" % DEFAULT_CRYPTOSUITE,
+    )
     sign_p.add_argument("--sock", help="did-agent socket path")
     sign_p.add_argument("--keys-dir", help="on-disk key directory fallback")
-    sign_p.add_argument("--format", choices=["json", "yaml", "toml"], help="output format")
+    sign_p.add_argument(
+        "--format", choices=["json", "yaml", "toml"], help="output format"
+    )
     sign_p.add_argument("-o", "--output", help="output file (default: stdout)")
 
     verify_p = sub.add_parser("verify", help="Verify a VC document")
@@ -491,12 +494,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     args = parser.parse_args(argv)
 
     if args.action == "cryptosuites":
-        rows = [{"name": s.name, "available": s.available} for s in CRYPTOSUITES.values()]
+        rows = [
+            {"name": s.name, "available": s.available} for s in CRYPTOSUITES.values()
+        ]
         if args.json:
             print(json.dumps(rows, indent=2))
         else:
             for row in rows:
-                print("%-20s %s" % (row["name"], "available" if row["available"] else "stub"))
+                print(
+                    "%-20s %s"
+                    % (row["name"], "available" if row["available"] else "stub")
+                )
         return 0
 
     if args.action == "sign":
@@ -508,7 +516,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 environ["DID_AGENT_SOCK"] = sock
             backend = resolve_key_backend(environ, args.keys_dir, log=logger)
             if backend is None:
-                logger.error("no signing key available (run a did-agent or pass --keys-dir)")
+                logger.error(
+                    "no signing key available (run a did-agent or pass --keys-dir)"
+                )
                 return 1
             signed = sign_document(doc, backend, cryptosuite=args.cryptosuite)
         except CryptosuiteError as exc:
@@ -519,7 +529,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         if args.output:
             with open(args.output, "w", encoding="utf-8") as fh:
                 fh.write(text if text.endswith("\n") else text + "\n")
-            logger.info("wrote signed document %s (issuer %s)", args.output, signed["issuer"])
+            logger.info(
+                "wrote signed document %s (issuer %s)", args.output, signed["issuer"]
+            )
         else:
             print(text)
         return 0

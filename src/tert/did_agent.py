@@ -232,7 +232,9 @@ class DidAgentClient:
     def __init__(self, sock_path: Optional[str] = None) -> None:
         self.sock_path = sock_path or os.environ.get(DEFAULT_SOCK_ENV)
         if not self.sock_path:
-            raise DidAgentError("no agent socket (set %s or pass sock_path)" % DEFAULT_SOCK_ENV)
+            raise DidAgentError(
+                "no agent socket (set %s or pass sock_path)" % DEFAULT_SOCK_ENV
+            )
 
     def _request(self, line: str, timeout: float = 10.0) -> str:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
@@ -247,7 +249,9 @@ class DidAgentClient:
                 buf += chunk
         response = buf.split(b"\n", 1)[0].decode("utf-8", "replace")
         if not response.startswith("OK"):
-            raise DidAgentError(response[4:] if response.startswith("ERR ") else response)
+            raise DidAgentError(
+                response[4:] if response.startswith("ERR ") else response
+            )
         return response[3:] if len(response) > 2 else ""
 
     def ping(self) -> str:
@@ -289,10 +293,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("data", nargs="?", help="data to sign (for the sign action)")
     parser.add_argument("--sock", help="agent socket path")
     parser.add_argument("--seed-file", help="file containing a base64/hex 32-byte seed")
-    parser.add_argument("--print-env", action="store_true",
-                        help="print the DID_AGENT_SOCK export line on startup")
-    parser.add_argument("--once", action="store_true",
-                        help="handle a single request then exit (for testing)")
+    parser.add_argument(
+        "--print-env",
+        action="store_true",
+        help="print the DID_AGENT_SOCK export line on startup",
+    )
+    parser.add_argument(
+        "--once",
+        action="store_true",
+        help="handle a single request then exit (for testing)",
+    )
     return parser
 
 

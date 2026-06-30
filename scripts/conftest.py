@@ -29,13 +29,14 @@ os.environ["PYTEST_RUNNING"] = "1"
 def setup_recursion_protection():
     """
     Session-level setup to ensure recursion protection is active.
-    
+
     This fixture verifies that PYTEST_RUNNING is set, which should prevent
     any code in run_tests.py main() from executing subprocess calls that
     could lead to recursion.
     """
-    assert os.environ.get("PYTEST_RUNNING") == "1", \
+    assert os.environ.get("PYTEST_RUNNING") == "1", (
         "PYTEST_RUNNING environment variable not set - recursion protection inactive!"
+    )
     yield
     # Cleanup: remove the marker after all tests
     os.environ.pop("PYTEST_RUNNING", None)
@@ -44,23 +45,22 @@ def setup_recursion_protection():
 def pytest_configure(config):
     """
     Pytest hook called before test collection.
-    
+
     Used to register custom markers for recursion-sensitive tests.
     """
     config.addinivalue_line(
         "markers",
-        "skip_if_pytest_running: skip test if running under pytest (to prevent recursion)"
+        "skip_if_pytest_running: skip test if running under pytest (to prevent recursion)",
     )
     config.addinivalue_line(
-        "markers",
-        "requires_mock: test requires subprocess mocking"
+        "markers", "requires_mock: test requires subprocess mocking"
     )
 
 
 def pytest_collection_modifyitems(config, items):
     """
     Pytest hook to modify test items during collection.
-    
+
     Automatically skip tests that shouldn't run when pytest is running,
     to prevent recursion issues.
     """

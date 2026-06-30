@@ -26,6 +26,7 @@ in a headless browser context without mocking the DOM.  The init() function
 is self-contained and only runs after DOMContentLoaded, making it safe to
 load the script in Playwright page.addScriptTag().
 """
+
 import re
 import sqlite3
 import pathlib
@@ -35,12 +36,14 @@ import pytest
 
 try:
     import datasette.app
+
     DATASETTE_AVAILABLE = True
 except ImportError:
     DATASETTE_AVAILABLE = False
 
 try:
     import playwright.async_api  # noqa: F401
+
     PLAYWRIGHT_AVAILABLE = True
 except ImportError:
     PLAYWRIGHT_AVAILABLE = False
@@ -49,8 +52,9 @@ skip_no_datasette = pytest.mark.skipif(
     not DATASETTE_AVAILABLE, reason="datasette not installed"
 )
 skip_no_playwright = pytest.mark.skipif(
-    not PLAYWRIGHT_AVAILABLE, reason="pytest-playwright not installed; "
-    "run: pip install pytest-playwright && playwright install chromium"
+    not PLAYWRIGHT_AVAILABLE,
+    reason="pytest-playwright not installed; "
+    "run: pip install pytest-playwright && playwright install chromium",
 )
 
 # ---------------------------------------------------------------------------
@@ -63,25 +67,25 @@ skip_no_playwright = pytest.mark.skipif(
 #   c' = round(c + (255 - c) * 0.70)
 # Source: Smith & van der Walt, SciPy 2015 (CC0). https://bids.github.io/colormap/
 VIRIDIS_COLORS: list[str] = [
-    '#c7b3cc',  # t=0.000 — deep purple lightened
-    '#c8c2d8',  # t=0.143 — purple lightened
-    '#c3cedd',  # t=0.286 — blue lightened
-    '#bed9dd',  # t=0.429 — teal lightened
-    '#bce3db',  # t=0.571 — teal-green lightened
-    '#c9ecd3',  # t=0.714 — green lightened
-    '#e2f4c4',  # t=0.857 — yellow-green lightened
-    '#fef8be',  # t=1.000 — yellow lightened
+    "#c7b3cc",  # t=0.000 — deep purple lightened
+    "#c8c2d8",  # t=0.143 — purple lightened
+    "#c3cedd",  # t=0.286 — blue lightened
+    "#bed9dd",  # t=0.429 — teal lightened
+    "#bce3db",  # t=0.571 — teal-green lightened
+    "#c9ecd3",  # t=0.714 — green lightened
+    "#e2f4c4",  # t=0.857 — yellow-green lightened
+    "#fef8be",  # t=1.000 — yellow lightened
 ]
 
 PASTEL_COLORS: list[str] = [
-    '#fff176',  # yellow
-    '#b3f0ff',  # cyan
-    '#c8f7c5',  # green
-    '#ffcba4',  # peach
-    '#e8b4ff',  # purple
-    '#ffd4d4',  # pink-red
-    '#d4e4ff',  # blue
-    '#ffe4b5',  # amber
+    "#fff176",  # yellow
+    "#b3f0ff",  # cyan
+    "#c8f7c5",  # green
+    "#ffcba4",  # peach
+    "#e8b4ff",  # purple
+    "#ffd4d4",  # pink-red
+    "#d4e4ff",  # blue
+    "#ffe4b5",  # amber
 ]
 
 # Glasbey bw_minc_20 — first 8 from colorcet.glasbey_bw_minc_20, blended
@@ -96,49 +100,49 @@ PASTEL_COLORS: list[str] = [
 # Color Research & Application 32.4: 304-309.
 # https://strathprints.strath.ac.uk/30312/1/colorpaper_2006.pdf
 GLASBEY_BW_MINC_20_COLORS: list[str] = [
-    '#ef9999',  #  0: #d70000 lightened — red
-    '#d1b1ff',  #  1: #8c3cff lightened — purple
-    '#9acf99',  #  2: #028800 lightened — green
-    '#99dee9',  #  3: #00acc7 lightened — teal
-    '#d6ff99',  #  4: #98ff00 lightened — lime
-    '#ffcced',  #  5: #ff7fd1 lightened — pink
-    '#c499b9',  #  6: #6c004f lightened — mauve
-    '#ffdbac',  #  7: #ffa530 lightened — orange
-    '#bcb199',  #  8: #583b00 lightened — dark brown
-    '#99bcbd',  #  9: #005759 lightened — dark teal
-    '#9999f1',  # 10: #0000dd lightened — blue
-    '#99feec',  # 11: #00fdcf lightened — cyan-mint
-    '#d9c8c3',  # 12: #a1756a lightened — dusty rose
-    '#e4e2ff',  # 13: #bcb7ff lightened — lavender
-    '#d5e1c9',  # 14: #95b578 lightened — sage
-    '#e69be3',  # 15: #c004b9 lightened — magenta
-    '#c1bbc7',  # 16: #645474 lightened — muted purple
-    '#c99999',  # 17: #790000 lightened — dark red
-    '#9cc7ef',  # 18: #0774d8 lightened — sky blue
-    '#fffbd3',  # 19: #fef590 lightened — pale yellow
-    '#99b799',  # 20: #004b00 lightened — dark green
-    '#d2ca99',  # 21: #8f7a00 lightened — olive
-    '#ffc7c2',  # 22: #ff7266 lightened — salmon
-    '#f8e3e3',  # 23: #eeb9b9 lightened — blush
-    '#bfcbc2',  # 24: #5e7e66 lightened — muted sage
-    '#d7f4ff',  # 25: #9be4ff lightened — pale cyan
-    '#f799c9',  # 26: #ec0077 lightened — hot pink
-    '#dbcae3',  # 27: #a67bb9 lightened — soft violet
-    '#bd99db',  # 28: #5a00a4 lightened — indigo
-    '#9be899',  # 29: #04c600 lightened — bright green
-    '#d8b799',  # 30: #9e4b00 lightened — burnt sienna
-    '#d7b1b9',  # 31: #9c3b50 lightened — dusty burgundy
+    "#ef9999",  #  0: #d70000 lightened — red
+    "#d1b1ff",  #  1: #8c3cff lightened — purple
+    "#9acf99",  #  2: #028800 lightened — green
+    "#99dee9",  #  3: #00acc7 lightened — teal
+    "#d6ff99",  #  4: #98ff00 lightened — lime
+    "#ffcced",  #  5: #ff7fd1 lightened — pink
+    "#c499b9",  #  6: #6c004f lightened — mauve
+    "#ffdbac",  #  7: #ffa530 lightened — orange
+    "#bcb199",  #  8: #583b00 lightened — dark brown
+    "#99bcbd",  #  9: #005759 lightened — dark teal
+    "#9999f1",  # 10: #0000dd lightened — blue
+    "#99feec",  # 11: #00fdcf lightened — cyan-mint
+    "#d9c8c3",  # 12: #a1756a lightened — dusty rose
+    "#e4e2ff",  # 13: #bcb7ff lightened — lavender
+    "#d5e1c9",  # 14: #95b578 lightened — sage
+    "#e69be3",  # 15: #c004b9 lightened — magenta
+    "#c1bbc7",  # 16: #645474 lightened — muted purple
+    "#c99999",  # 17: #790000 lightened — dark red
+    "#9cc7ef",  # 18: #0774d8 lightened — sky blue
+    "#fffbd3",  # 19: #fef590 lightened — pale yellow
+    "#99b799",  # 20: #004b00 lightened — dark green
+    "#d2ca99",  # 21: #8f7a00 lightened — olive
+    "#ffc7c2",  # 22: #ff7266 lightened — salmon
+    "#f8e3e3",  # 23: #eeb9b9 lightened — blush
+    "#bfcbc2",  # 24: #5e7e66 lightened — muted sage
+    "#d7f4ff",  # 25: #9be4ff lightened — pale cyan
+    "#f799c9",  # 26: #ec0077 lightened — hot pink
+    "#dbcae3",  # 27: #a67bb9 lightened — soft violet
+    "#bd99db",  # 28: #5a00a4 lightened — indigo
+    "#9be899",  # 29: #04c600 lightened — bright green
+    "#d8b799",  # 30: #9e4b00 lightened — burnt sienna
+    "#d7b1b9",  # 31: #9c3b50 lightened — dusty burgundy
 ]
 
 
 def resolve_colors(cfg: dict | None) -> list[str]:
     """Python equivalent of FtsHighlight.resolveColors(cfg)."""
-    c = (cfg or {}).get('colors')
-    if not c or c == 'viridis':
+    c = (cfg or {}).get("colors")
+    if not c or c == "viridis":
         return VIRIDIS_COLORS
-    if c == 'pastel':
+    if c == "pastel":
         return PASTEL_COLORS
-    if c == 'glasbey_bw_minc_20':
+    if c == "glasbey_bw_minc_20":
         return GLASBEY_BW_MINC_20_COLORS
     if isinstance(c, list) and len(c) > 0:
         return c
@@ -151,6 +155,7 @@ def resolve_colors(cfg: dict | None) -> list[str]:
 # cross-language contract.
 # ---------------------------------------------------------------------------
 
+
 def extract_tokens(query: str) -> list[str]:
     """Python equivalent of FtsHighlight.extractTokens(query)."""
     tokens: list[str] = []
@@ -160,10 +165,10 @@ def extract_tokens(query: str) -> list[str]:
     tokens.extend(p.strip() for p in phrases if p.strip())
 
     # 2. Strip structure from remainder
-    remainder = re.sub(r'"[^"]*"', ' ', query)
-    remainder = re.sub(r'NEAR\s*\([^)]*\)', ' ', remainder, flags=re.IGNORECASE)
-    remainder = re.sub(r'\b(AND|OR|NOT)\b', ' ', remainder, flags=re.IGNORECASE)
-    remainder = re.sub(r'[{}\[\]^*:]', ' ', remainder)
+    remainder = re.sub(r'"[^"]*"', " ", query)
+    remainder = re.sub(r"NEAR\s*\([^)]*\)", " ", remainder, flags=re.IGNORECASE)
+    remainder = re.sub(r"\b(AND|OR|NOT)\b", " ", remainder, flags=re.IGNORECASE)
+    remainder = re.sub(r"[{}\[\]^*:]", " ", remainder)
 
     # 3. Words with ≥ 2 chars
     words = [w for w in remainder.split() if len(w) >= 2]
@@ -184,10 +189,11 @@ def extract_tokens(query: str) -> list[str]:
 def tokens_from_url(url: str) -> list[str]:
     """Python equivalent of FtsHighlight.tokensFromUrl() given a full URL string."""
     from urllib.parse import urlparse, parse_qs
+
     qs = parse_qs(urlparse(url).query)
     tokens: list[str] = []
     for key, vals in qs.items():
-        if key == '_search' or key.startswith('_search_'):
+        if key == "_search" or key.startswith("_search_"):
             for v in vals:
                 tokens.extend(extract_tokens(v))
     # Deduplicate
@@ -205,6 +211,7 @@ def tokens_from_url(url: str) -> list[str]:
 # 1. Unit tests — token extraction logic
 # ===========================================================================
 
+
 class TestExtractTokens:
     """Mirrors FtsHighlight.extractTokens() contract."""
 
@@ -219,12 +226,12 @@ class TestExtractTokens:
     def test_strips_AND_OR_NOT(self):
         result = extract_tokens("pytest AND cargo OR tert NOT foo")
         assert "AND" not in result
-        assert "OR"  not in result
+        assert "OR" not in result
         assert "NOT" not in result
         assert "pytest" in result
-        assert "cargo"  in result
-        assert "tert"   in result
-        assert "foo"    in result
+        assert "cargo" in result
+        assert "tert" in result
+        assert "foo" in result
 
     def test_strips_NEAR_expression(self):
         result = extract_tokens("NEAR(pytest cargo, 5)")
@@ -236,7 +243,7 @@ class TestExtractTokens:
         assert "pytest cargo" in result
         # individual words should not appear separately
         assert "pytest" not in result
-        assert "cargo"  not in result
+        assert "cargo" not in result
 
     def test_wildcard_stripped(self):
         result = extract_tokens("pytest*")
@@ -278,7 +285,9 @@ class TestTokensFromUrl:
     """Mirrors FtsHighlight.tokensFromUrl() contract."""
 
     def test_search_param(self):
-        result = tokens_from_url("http://localhost:8001/replog/test_runs?_search=pytest")
+        result = tokens_from_url(
+            "http://localhost:8001/replog/test_runs?_search=pytest"
+        )
         assert "pytest" in result
 
     def test_search_colname_param(self):
@@ -293,7 +302,7 @@ class TestTokensFromUrl:
             "?_search=pytest&_search_command=cargo"
         )
         assert "pytest" in result
-        assert "cargo"  in result
+        assert "cargo" in result
 
     def test_no_search_param_returns_empty(self):
         result = tokens_from_url("http://localhost:8001/replog/test_runs")
@@ -311,6 +320,7 @@ class TestTokensFromUrl:
 # 1c. Unit tests — resolveColors() / FTS_HIGHLIGHT_CONFIG color option
 # ===========================================================================
 
+
 class TestResolveColors:
     """Mirrors FtsHighlight.resolveColors(cfg) contract.
 
@@ -327,27 +337,30 @@ class TestResolveColors:
         assert resolve_colors({}) == VIRIDIS_COLORS
 
     def test_colors_null_gives_viridis(self):
-        assert resolve_colors({'colors': None}) == VIRIDIS_COLORS
+        assert resolve_colors({"colors": None}) == VIRIDIS_COLORS
 
     def test_colors_viridis_gives_viridis(self):
-        assert resolve_colors({'colors': 'viridis'}) == VIRIDIS_COLORS
+        assert resolve_colors({"colors": "viridis"}) == VIRIDIS_COLORS
 
     def test_colors_pastel_gives_pastel(self):
-        assert resolve_colors({'colors': 'pastel'}) == PASTEL_COLORS
+        assert resolve_colors({"colors": "pastel"}) == PASTEL_COLORS
 
     def test_colors_custom_array(self):
-        custom = ['#aabbcc', '#ddeeff']
-        assert resolve_colors({'colors': custom}) == custom
+        custom = ["#aabbcc", "#ddeeff"]
+        assert resolve_colors({"colors": custom}) == custom
 
     def test_colors_empty_array_falls_back_to_viridis(self):
         # An empty list is treated as "not set" — fall back to viridis
-        assert resolve_colors({'colors': []}) == VIRIDIS_COLORS
+        assert resolve_colors({"colors": []}) == VIRIDIS_COLORS
 
     def test_colors_unknown_string_falls_back_to_viridis(self):
-        assert resolve_colors({'colors': 'plasma'}) == VIRIDIS_COLORS
+        assert resolve_colors({"colors": "plasma"}) == VIRIDIS_COLORS
 
     def test_colors_glasbey_bw_minc_20(self):
-        assert resolve_colors({'colors': 'glasbey_bw_minc_20'}) == GLASBEY_BW_MINC_20_COLORS
+        assert (
+            resolve_colors({"colors": "glasbey_bw_minc_20"})
+            == GLASBEY_BW_MINC_20_COLORS
+        )
 
     def test_glasbey_has_eight_entries(self):
         assert len(GLASBEY_BW_MINC_20_COLORS) == 32
@@ -355,9 +368,11 @@ class TestResolveColors:
     def test_glasbey_colors_are_valid_hex(self):
         """Each glasbey entry must be a 7-char #rrggbb string."""
         import re as _re
+
         for color in GLASBEY_BW_MINC_20_COLORS:
-            assert _re.fullmatch(r'#[0-9a-fA-F]{6}', color), \
+            assert _re.fullmatch(r"#[0-9a-fA-F]{6}", color), (
                 f"Invalid hex color: {color}"
+            )
 
     def test_glasbey_colors_are_light(self):
         """Lightened glasbey backgrounds must be perceptually light (avg channel > 150)."""
@@ -366,8 +381,9 @@ class TestResolveColors:
             g = int(color[3:5], 16)
             b = int(color[5:7], 16)
             avg = (r + g + b) / 3
-            assert avg > 150, \
+            assert avg > 150, (
                 f"{color} is too dark for a highlight background (avg={avg:.0f})"
+            )
 
     def test_glasbey_derivation_60pct_white_blend(self):
         """Verify the 60%-white-blend derivation for two known glasbey samples.
@@ -391,9 +407,9 @@ class TestResolveColors:
           B' = round(80 + 175*0.60)   = round(185)   = 185 = 0xB9
         → #d7b1b9
         """
-        assert GLASBEY_BW_MINC_20_COLORS[0] == '#ef9999'
-        assert GLASBEY_BW_MINC_20_COLORS[7] == '#ffdbac'
-        assert GLASBEY_BW_MINC_20_COLORS[31] == '#d7b1b9'
+        assert GLASBEY_BW_MINC_20_COLORS[0] == "#ef9999"
+        assert GLASBEY_BW_MINC_20_COLORS[7] == "#ffdbac"
+        assert GLASBEY_BW_MINC_20_COLORS[31] == "#d7b1b9"
 
     def test_viridis_has_eight_entries(self):
         assert len(VIRIDIS_COLORS) == 8
@@ -404,9 +420,11 @@ class TestResolveColors:
     def test_viridis_colors_are_valid_hex(self):
         """Each viridis entry must be a 7-char #rrggbb string."""
         import re as _re
+
         for color in VIRIDIS_COLORS:
-            assert _re.fullmatch(r'#[0-9a-fA-F]{6}', color), \
+            assert _re.fullmatch(r"#[0-9a-fA-F]{6}", color), (
                 f"Invalid hex color: {color}"
+            )
 
     def test_viridis_colors_are_light(self):
         """Lightened viridis backgrounds must be perceptually light (avg channel > 150)."""
@@ -415,8 +433,9 @@ class TestResolveColors:
             g = int(color[3:5], 16)
             b = int(color[5:7], 16)
             avg = (r + g + b) / 3
-            assert avg > 150, \
+            assert avg > 150, (
                 f"{color} is too dark for a highlight background (avg={avg:.0f})"
+            )
 
     def test_viridis_derivation_70pct_white_blend(self):
         """Verify the 70%-white-blend derivation for a known viridis sample.
@@ -427,19 +446,19 @@ class TestResolveColors:
           G' = round(231 + 24*0.70) = 248 = 0xF8
           B' = round(37 + 218*0.70) = 190 = 0xBE
         """
-        assert VIRIDIS_COLORS[-1] == '#fef8be'
+        assert VIRIDIS_COLORS[-1] == "#fef8be"
 
     def test_storage_key_default(self):
         """Default storageKey must be 'tert-fts-hl' when not overridden."""
         cfg = {}
-        key = cfg.get('storageKey') or 'tert-fts-hl'
-        assert key == 'tert-fts-hl'
+        key = cfg.get("storageKey") or "tert-fts-hl"
+        assert key == "tert-fts-hl"
 
     def test_storage_key_custom(self):
         """Custom storageKey must be returned as-is."""
-        cfg = {'storageKey': 'my-app-fts-hl'}
-        key = cfg.get('storageKey') or 'tert-fts-hl'
-        assert key == 'my-app-fts-hl'
+        cfg = {"storageKey": "my-app-fts-hl"}
+        key = cfg.get("storageKey") or "tert-fts-hl"
+        assert key == "my-app-fts-hl"
 
 
 # ===========================================================================
@@ -448,12 +467,14 @@ class TestResolveColors:
 #     something to highlight)
 # ===========================================================================
 
+
 @pytest.fixture
 def replog_db(tmp_path):
     """Create a minimal replog DB with FTS5 content tables for testing."""
     import sys, os
-    os.environ.setdefault('PYTEST_RUNNING', '1')
-    repo_src = pathlib.Path(__file__).parent.parent / 'src'
+
+    os.environ.setdefault("PYTEST_RUNNING", "1")
+    repo_src = pathlib.Path(__file__).parent.parent / "src"
     sys.path.insert(0, str(repo_src))
     from tert.run_tests import ReplogDB, TertTestRun  # type: ignore
 
@@ -478,14 +499,18 @@ def replog_db(tmp_path):
     for run in runs:
         db.insert_run(run)
         db.insert_artifact(
-            run.epoch_ns, run.timestamp_ns, run.out_dir,
+            run.epoch_ns,
+            run.timestamp_ns,
+            run.out_dir,
             "pytest-results.xml",
             f"<testsuite name='tert_tests' epoch='{run.epoch_ns}'/>",
             "pytest",
             run.exit_code,
         )
         db.insert_artifact(
-            run.epoch_ns, run.timestamp_ns, run.out_dir,
+            run.epoch_ns,
+            run.timestamp_ns,
+            run.out_dir,
             "build.log",
             f"cargo build --release  epoch={run.epoch_ns}",
             "cargo build",
@@ -506,10 +531,12 @@ class TestDatasetteFTSIntegration:
     def _get_async(self, coro):
         """Run an async coroutine synchronously (Python 3.10+ compatible)."""
         import asyncio
+
         return asyncio.run(coro)
 
     def _make_ds(self, db_path: pathlib.Path):
         import datasette.app
+
         return datasette.app.Datasette(
             files=[str(db_path)],
             settings={"sql_time_limit_ms": 3500},
@@ -517,18 +544,22 @@ class TestDatasetteFTSIntegration:
 
     def test_table_page_returns_200(self, replog_db):
         ds = self._make_ds(replog_db)
+
         async def _get():
             return await ds.client.get("/test_replog/test_runs")
+
         r = self._get_async(_get())
         assert r.status_code == 200
 
     def test_search_returns_matching_rows_json(self, replog_db):
         """?_search=pytest should find the pytest artifact rows."""
         ds = self._make_ds(replog_db)
+
         async def _get():
             return await ds.client.get(
                 "/test_replog/test_artifacts.json?_search=pytest&_shape=array"
             )
+
         r = self._get_async(_get())
         assert r.status_code == 200
         data = r.json()
@@ -539,11 +570,13 @@ class TestDatasetteFTSIntegration:
     def test_search_no_match_returns_empty(self, replog_db):
         """?_search=NOMATCH should return zero rows."""
         ds = self._make_ds(replog_db)
+
         async def _get():
             return await ds.client.get(
                 "/test_replog/test_artifacts.json"
                 "?_search=ZZZNOMATCH_XYZ_ZZZZ&_shape=array"
             )
+
         r = self._get_async(_get())
         assert r.status_code == 200
         assert r.json() == []
@@ -551,11 +584,12 @@ class TestDatasetteFTSIntegration:
     def test_search_column_filter(self, replog_db):
         """?_search_command=cargo should only match rows whose command contains 'cargo'."""
         ds = self._make_ds(replog_db)
+
         async def _get():
             return await ds.client.get(
-                "/test_replog/test_artifacts.json"
-                "?_search_command=cargo&_shape=array"
+                "/test_replog/test_artifacts.json?_search_command=cargo&_shape=array"
             )
+
         r = self._get_async(_get())
         assert r.status_code == 200
         data = r.json()
@@ -566,12 +600,15 @@ class TestDatasetteFTSIntegration:
         """GET /static/search-highlight.js must return 200 with JS content."""
         static_dir = pathlib.Path(__file__).parent.parent / "static"
         import datasette.app
+
         ds = datasette.app.Datasette(
             files=[str(replog_db)],
             static_mounts=[("static", str(static_dir))],
         )
+
         async def _get():
             return await ds.client.get("/static/search-highlight.js")
+
         r = self._get_async(_get())
         assert r.status_code == 200
         assert "FtsHighlight" in r.text, "JS must expose window.FtsHighlight"
@@ -581,12 +618,15 @@ class TestDatasetteFTSIntegration:
         """GET /static/fts-highlight-config.js must return 200 with config object."""
         static_dir = pathlib.Path(__file__).parent.parent / "static"
         import datasette.app
+
         ds = datasette.app.Datasette(
             files=[str(replog_db)],
             static_mounts=[("static", str(static_dir))],
         )
+
         async def _get():
             return await ds.client.get("/static/fts-highlight-config.js")
+
         r = self._get_async(_get())
         assert r.status_code == 200
         assert "FTS_HIGHLIGHT_CONFIG" in r.text
@@ -597,27 +637,34 @@ class TestDatasetteFTSIntegration:
         """Config file must include citation URL for the viridis colormap."""
         static_dir = pathlib.Path(__file__).parent.parent / "static"
         import datasette.app
+
         ds = datasette.app.Datasette(
             files=[str(replog_db)],
             static_mounts=[("static", str(static_dir))],
         )
+
         async def _get():
             return await ds.client.get("/static/fts-highlight-config.js")
+
         r = self._get_async(_get())
         assert r.status_code == 200
-        assert "bids.github.io/colormap" in r.text, \
+        assert "bids.github.io/colormap" in r.text, (
             "Config file must cite the viridis colormap source"
+        )
 
     def test_search_highlight_js_contains_viridis_colors(self, replog_db, tmp_path):
         """search-highlight.js must export VIRIDIS_COLORS with the expected first entry."""
         static_dir = pathlib.Path(__file__).parent.parent / "static"
         import datasette.app
+
         ds = datasette.app.Datasette(
             files=[str(replog_db)],
             static_mounts=[("static", str(static_dir))],
         )
+
         async def _get():
             return await ds.client.get("/static/search-highlight.js")
+
         r = self._get_async(_get())
         assert r.status_code == 200
         assert "VIRIDIS_COLORS" in r.text
@@ -636,13 +683,16 @@ class TestDatasetteFTSIntegration:
             ],
         }
         import datasette.app
+
         ds = datasette.app.Datasette(
             files=[str(replog_db)],
             static_mounts=[("static", str(static_dir))],
             metadata=metadata,
         )
+
         async def _get():
             return await ds.client.get("/test_replog/test_runs")
+
         r = self._get_async(_get())
         assert r.status_code == 200
         assert "fts-highlight-config.js" in r.text
@@ -666,6 +716,7 @@ class TestDatasetteFTSIntegration:
 #   - No marks appear when there is no ?_search= param
 # ===========================================================================
 
+
 @skip_no_playwright
 class TestBrowserHighlight:
     """Headless browser tests for search-highlight.js v2 behaviour.
@@ -682,41 +733,59 @@ class TestBrowserHighlight:
 
         static_dir = str(pathlib.Path(__file__).parent.parent / "static")
         meta = tmp_path / "meta.json"
-        meta.write_text(json.dumps({
-            "extra_js_urls":  ["/static/search-highlight.js"],
-            "extra_css_urls": ["/static/custom.css"],
-            "databases": {
-                replog_db.stem: {
-                    "tables": {
-                        "test_runs":      {"fts_table": "test_runs_fts"},
-                        "test_artifacts": {"fts_table": "test_artifacts_fts"},
-                    }
+        meta.write_text(
+            json.dumps(
+                {
+                    "extra_js_urls": ["/static/search-highlight.js"],
+                    "extra_css_urls": ["/static/custom.css"],
+                    "databases": {
+                        replog_db.stem: {
+                            "tables": {
+                                "test_runs": {"fts_table": "test_runs_fts"},
+                                "test_artifacts": {"fts_table": "test_artifacts_fts"},
+                            }
+                        }
+                    },
                 }
-            }
-        }))
+            )
+        )
 
         with socket.socket() as s:
-            s.bind(('', 0))
+            s.bind(("", 0))
             port = s.getsockname()[1]
 
         proc = subprocess.Popen(
-            [sys.executable, "-m", "datasette", "serve",
-             str(replog_db), "--metadata", str(meta),
-             "--static", f"static:{static_dir}",
-             "--port", str(port), "--noenv"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            [
+                sys.executable,
+                "-m",
+                "datasette",
+                "serve",
+                str(replog_db),
+                "--metadata",
+                str(meta),
+                "--static",
+                f"static:{static_dir}",
+                "--port",
+                str(port),
+                "--noenv",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
         )
         deadline = time.time() + 10
         while time.time() < deadline:
             try:
                 import urllib.request
-                urllib.request.urlopen(f"http://localhost:{port}/-/versions.json", timeout=1)
+
+                urllib.request.urlopen(
+                    f"http://localhost:{port}/-/versions.json", timeout=1
+                )
                 break
             except Exception:
                 time.sleep(0.2)
 
         self.base_url = f"http://localhost:{port}"
-        self.db_name  = replog_db.stem
+        self.db_name = replog_db.stem
         yield
         proc.terminate()
         proc.wait()
@@ -766,7 +835,7 @@ class TestBrowserHighlight:
         page.wait_for_load_state("networkidle")
         texts = [m.text_content().lower() for m in page.locator("td mark.fts-hl").all()]
         assert any(t == "pytest" for t in texts), "pytest not highlighted"
-        assert any(t == "cargo"  for t in texts), "cargo not highlighted"
+        assert any(t == "cargo" for t in texts), "cargo not highlighted"
 
     def test_each_term_has_distinct_data_idx(self, page):
         """Multiple terms must get distinct data-idx values (0, 1, …)."""
@@ -774,8 +843,7 @@ class TestBrowserHighlight:
         page.goto(self._url("test_artifacts", "?_search=pytest+cargo"))
         page.wait_for_load_state("networkidle")
         idxs = set(
-            m.get_attribute("data-idx")
-            for m in page.locator("td mark.fts-hl").all()
+            m.get_attribute("data-idx") for m in page.locator("td mark.fts-hl").all()
         )
         assert len(idxs) > 1, "Expected marks with different data-idx values"
 
@@ -816,9 +884,7 @@ class TestBrowserHighlight:
         assert btn.get_attribute("aria-pressed") == "false"
         assert "OFF" in btn.text_content()
         # Marks are still in the DOM but hidden via CSS — check style rule
-        css = page.evaluate(
-            "document.getElementById('fts-hl-styles').textContent"
-        )
+        css = page.evaluate("document.getElementById('fts-hl-styles').textContent")
         assert "display: none" in css
 
     def test_master_toggle_click_twice_restores(self, page):
@@ -841,6 +907,7 @@ class TestBrowserHighlight:
         page.locator("#fts-highlight-toggle").click()
         raw = page.evaluate("localStorage.getItem('tert-fts-hl')")
         import json as _json
+
         assert _json.loads(raw)["allEnabled"] is False
 
     def test_master_toggle_state_survives_reload(self, page):
@@ -902,8 +969,9 @@ class TestBrowserHighlight:
         page.goto(self._url("test_artifacts", "?_search=pytest"))
         page.wait_for_load_state("networkidle")
         val = page.locator(".fts-term-row input[type='color']").first.input_value()
-        assert val.lower() == "#c7b3cc", \
+        assert val.lower() == "#c7b3cc", (
             f"Expected viridis first color #c7b3cc, got {val}"
+        )
 
     def test_color_picker_reflects_pastel_when_config_set(self, page):
         """When FTS_HIGHLIGHT_CONFIG.colors='pastel', first color must be #fff176."""
@@ -949,7 +1017,7 @@ class TestBrowserHighlight:
         self._clear_storage(page)
         page.goto(self._url("test_artifacts", "?_search=pytest"))
         page.wait_for_load_state("networkidle")
-        custom = ['#aabbcc', '#ddeeff']
+        custom = ["#aabbcc", "#ddeeff"]
         colors = page.evaluate(
             "window.FtsHighlight.resolveColors({ colors: ['#aabbcc', '#ddeeff'] })"
         )
@@ -960,9 +1028,7 @@ class TestBrowserHighlight:
         self._clear_storage(page)
         page.goto(self._url("test_artifacts", "?_search=pytest"))
         page.wait_for_load_state("networkidle")
-        colors = page.evaluate(
-            "window.FtsHighlight.resolveColors({ colors: null })"
-        )
+        colors = page.evaluate("window.FtsHighlight.resolveColors({ colors: null })")
         assert colors[0].lower() == "#c7b3cc"
 
     def test_resolveColors_glasbey_in_browser(self, page):
@@ -1001,6 +1067,7 @@ class TestBrowserHighlight:
         }""")
         stored = page.evaluate("localStorage.getItem('custom-test-key')")
         import json as _json
+
         assert _json.loads(stored)["allEnabled"] is False
 
     def test_color_change_updates_stylesheet(self, page):
@@ -1014,7 +1081,7 @@ class TestBrowserHighlight:
                 el.value = '#ff0000';
                 el.dispatchEvent(new Event('input', {bubbles: true}));
             }""",
-            picker
+            picker,
         )
         css = page.evaluate("document.getElementById('fts-hl-styles').textContent")
         assert "#ff0000" in css.lower() or "ff0000" in css.lower()
@@ -1091,11 +1158,13 @@ class TestBrowserHighlight:
         self._clear_storage(page)
         page.goto(self._url("test_artifacts", "?_search=pytest"))
         page.wait_for_load_state("networkidle")
-        page.locator(".fts-term-remove").first.click()   # remove the only term
-        assert page.locator("#fts-highlight-panel").is_visible(), \
+        page.locator(".fts-term-remove").first.click()  # remove the only term
+        assert page.locator("#fts-highlight-panel").is_visible(), (
             "Panel must remain visible after all terms are removed"
-        assert page.locator(".fts-add-input").is_visible(), \
+        )
+        assert page.locator(".fts-add-input").is_visible(), (
             "Add-term input must still be visible after all terms removed"
+        )
 
     def test_remove_all_terms_clears_localstorage(self, page):
         """Removing all terms must clear the localStorage key so the next\
@@ -1105,8 +1174,7 @@ class TestBrowserHighlight:
         page.wait_for_load_state("networkidle")
         page.locator(".fts-term-remove").first.click()
         stored = page.evaluate("localStorage.getItem('tert-fts-hl')")
-        assert stored is None, \
-            "localStorage must be cleared when all terms are removed"
+        assert stored is None, "localStorage must be cleared when all terms are removed"
 
     def test_reload_after_removing_all_terms_reseeds_from_url(self, page):
         """After removing all terms and reloading, highlights must be restored\
@@ -1118,17 +1186,19 @@ class TestBrowserHighlight:
         page.reload()
         page.wait_for_load_state("networkidle")
         # URL still has ?_search=pytest → term rows should be re-populated
-        assert page.locator(".fts-term-row").count() == 1, \
+        assert page.locator(".fts-term-row").count() == 1, (
             "Reload must re-seed highlights from URL params"
-        assert page.locator("td mark.fts-hl").count() > 0, \
+        )
+        assert page.locator("td mark.fts-hl").count() > 0, (
             "Marks must reappear after reload re-seeds from URL"
+        )
 
     def test_empty_panel_allows_adding_new_term(self, page):
         """After removing all terms, the add-term row must still add new highlights."""
         self._clear_storage(page)
         page.goto(self._url("test_artifacts", "?_search=pytest"))
         page.wait_for_load_state("networkidle")
-        page.locator(".fts-term-remove").first.click()    # remove all
+        page.locator(".fts-term-remove").first.click()  # remove all
         # Add a different term using the now-empty panel
         page.locator(".fts-add-input").fill("cargo")
         page.locator(".fts-add-btn").click()

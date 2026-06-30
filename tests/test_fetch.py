@@ -1,4 +1,5 @@
 """Pytest tests for tert.fetch."""
+
 import os
 import subprocess
 from pathlib import Path
@@ -76,12 +77,15 @@ class TestFileHelpers:
 
 
 class TestBasename:
-    @pytest.mark.parametrize("url,expected", [
-        ("https://example.com/file.tar.gz", "file.tar.gz"),
-        ("https://example.com/a/b/c.bin?x=1#frag", "c.bin"),
-        ("https://example.com/", "index.html"),
-        ("https://example.com", "example.com"),
-    ])
+    @pytest.mark.parametrize(
+        "url,expected",
+        [
+            ("https://example.com/file.tar.gz", "file.tar.gz"),
+            ("https://example.com/a/b/c.bin?x=1#frag", "c.bin"),
+            ("https://example.com/", "index.html"),
+            ("https://example.com", "example.com"),
+        ],
+    )
     def test_basename_from_url(self, url, expected):
         assert basename_from_url(url) == expected
 
@@ -95,7 +99,9 @@ class TestDiscoverCaBundle:
 
     def test_env_precedence_order(self, tmp_path):
         env = {"CURL_CA_BUNDLE": "/a.pem", "SSL_CERT_FILE": "/b.pem"}
-        path, source = discover_ca_bundle(("CURL_CA_BUNDLE", "SSL_CERT_FILE"), env, candidates=())
+        path, source = discover_ca_bundle(
+            ("CURL_CA_BUNDLE", "SSL_CERT_FILE"), env, candidates=()
+        )
         assert path == "/a.pem"
         assert source == "env:CURL_CA_BUNDLE"
 
@@ -105,20 +111,25 @@ class TestDiscoverCaBundle:
         assert source == "candidate"
 
     def test_none_found(self, tmp_path):
-        path, source = discover_ca_bundle((), {}, candidates=(str(tmp_path / "missing"),))
+        path, source = discover_ca_bundle(
+            (), {}, candidates=(str(tmp_path / "missing"),)
+        )
         assert path is None
         assert source == "none"
 
 
 class TestDetectTlsBackend:
-    @pytest.mark.parametrize("text,expected", [
-        ("curl 8.15.0 libcurl/8.15.0 OpenSSL/3.5.4 zlib/1.3", "OpenSSL"),
-        ("GNU Wget2 2.2.1 +ssl/gnutls +https", "GnuTLS"),
-        ("libcurl LibreSSL/3.7", "LibreSSL"),
-        ("something BoringSSL based", "BoringSSL"),
-        ("no tls here", None),
-        (None, None),
-    ])
+    @pytest.mark.parametrize(
+        "text,expected",
+        [
+            ("curl 8.15.0 libcurl/8.15.0 OpenSSL/3.5.4 zlib/1.3", "OpenSSL"),
+            ("GNU Wget2 2.2.1 +ssl/gnutls +https", "GnuTLS"),
+            ("libcurl LibreSSL/3.7", "LibreSSL"),
+            ("something BoringSSL based", "BoringSSL"),
+            ("no tls here", None),
+            (None, None),
+        ],
+    )
     def test_detect(self, text, expected):
         assert detect_tls_backend(text) == expected
 
@@ -161,8 +172,13 @@ class TestVerifyCryptoConfig:
         assert problems == []
 
     def test_no_backend(self):
-        cfg = CryptoConfig(strategy="curl", ca_bundle_path="/x", ca_bundle_exists=True,
-                           ca_bundle_size=10, ca_bundle_cert_count=1)
+        cfg = CryptoConfig(
+            strategy="curl",
+            ca_bundle_path="/x",
+            ca_bundle_exists=True,
+            ca_bundle_size=10,
+            ca_bundle_cert_count=1,
+        )
         ok, problems = verify_crypto_config(cfg)
         assert ok is False
         assert any("TLS backend" in p for p in problems)
@@ -174,23 +190,37 @@ class TestVerifyCryptoConfig:
         assert any("no CA certificate bundle" in p for p in problems)
 
     def test_bundle_missing(self):
-        cfg = CryptoConfig(strategy="curl", tls_backend="OpenSSL",
-                           ca_bundle_path="/x", ca_bundle_exists=False)
+        cfg = CryptoConfig(
+            strategy="curl",
+            tls_backend="OpenSSL",
+            ca_bundle_path="/x",
+            ca_bundle_exists=False,
+        )
         ok, problems = verify_crypto_config(cfg)
         assert ok is False
         assert any("does not exist" in p for p in problems)
 
     def test_bundle_empty(self):
-        cfg = CryptoConfig(strategy="curl", tls_backend="OpenSSL",
-                           ca_bundle_path="/x", ca_bundle_exists=True, ca_bundle_size=0)
+        cfg = CryptoConfig(
+            strategy="curl",
+            tls_backend="OpenSSL",
+            ca_bundle_path="/x",
+            ca_bundle_exists=True,
+            ca_bundle_size=0,
+        )
         ok, problems = verify_crypto_config(cfg)
         assert ok is False
         assert any("empty" in p for p in problems)
 
     def test_bundle_no_certs(self):
-        cfg = CryptoConfig(strategy="curl", tls_backend="OpenSSL",
-                           ca_bundle_path="/x", ca_bundle_exists=True,
-                           ca_bundle_size=10, ca_bundle_cert_count=0)
+        cfg = CryptoConfig(
+            strategy="curl",
+            tls_backend="OpenSSL",
+            ca_bundle_path="/x",
+            ca_bundle_exists=True,
+            ca_bundle_size=10,
+            ca_bundle_cert_count=0,
+        )
         ok, problems = verify_crypto_config(cfg)
         assert ok is False
         assert any("no certificates" in p for p in problems)
@@ -211,8 +241,9 @@ class TestStrategySelection:
             assert resolve_strategy_name("auto") == "curl"
 
     def test_resolve_auto_falls_back_to_wget(self):
-        with patch.object(CurlStrategy, "executable", return_value=None), \
-             patch.object(WgetStrategy, "executable", return_value="/usr/bin/wget"):
+        with patch.object(CurlStrategy, "executable", return_value=None), patch.object(
+            WgetStrategy, "executable", return_value="/usr/bin/wget"
+        ):
             assert resolve_strategy_name("auto") == "wget"
 
     def test_resolve_explicit(self):
@@ -223,9 +254,13 @@ class TestCryptoConfigDiscovery:
     def test_curl_crypto_config(self, ca_bundle):
         env = {"CURL_CA_BUNDLE": str(ca_bundle)}
         strat = CurlStrategy(environ=env, candidates=())
-        with patch.object(strat, "executable", return_value="/usr/bin/curl"), \
-             patch.object(strat, "version_text",
-                          return_value="curl 8.15.0 libcurl/8.15.0 OpenSSL/3.5.4"):
+        with patch.object(
+            strat, "executable", return_value="/usr/bin/curl"
+        ), patch.object(
+            strat,
+            "version_text",
+            return_value="curl 8.15.0 libcurl/8.15.0 OpenSSL/3.5.4",
+        ):
             cfg = strat.crypto_config()
         assert cfg.strategy == "curl"
         assert cfg.available is True
@@ -238,9 +273,11 @@ class TestCryptoConfigDiscovery:
 
     def test_wget_crypto_config(self, ca_bundle):
         strat = WgetStrategy(environ={}, candidates=(str(ca_bundle),))
-        with patch.object(strat, "executable", return_value="/usr/bin/wget"), \
-             patch.object(strat, "version_text",
-                          return_value="GNU Wget2 2.2.1 +ssl/gnutls"):
+        with patch.object(
+            strat, "executable", return_value="/usr/bin/wget"
+        ), patch.object(
+            strat, "version_text", return_value="GNU Wget2 2.2.1 +ssl/gnutls"
+        ):
             cfg = strat.crypto_config()
         assert cfg.tls_backend == "GnuTLS"
         assert cfg.ca_bundle_source == "candidate"
@@ -257,8 +294,9 @@ class TestCryptoConfigDiscovery:
 class TestBuildCommand:
     def test_curl_command_includes_cacert(self, ca_bundle):
         strat = CurlStrategy(environ={}, candidates=())
-        cfg = CryptoConfig(strategy="curl", ca_bundle_path=str(ca_bundle),
-                           ca_bundle_exists=True)
+        cfg = CryptoConfig(
+            strategy="curl", ca_bundle_path=str(ca_bundle), ca_bundle_exists=True
+        )
         cmd = strat.build_command("https://x/y", "/tmp/y.part", cfg)
         assert "curl" == cmd[0]
         assert "--cacert" in cmd
@@ -267,8 +305,9 @@ class TestBuildCommand:
 
     def test_wget_command_includes_cacert(self, ca_bundle):
         strat = WgetStrategy(environ={}, candidates=())
-        cfg = CryptoConfig(strategy="wget", ca_bundle_path=str(ca_bundle),
-                           ca_bundle_exists=True)
+        cfg = CryptoConfig(
+            strategy="wget", ca_bundle_path=str(ca_bundle), ca_bundle_exists=True
+        )
         cmd = strat.build_command("https://x/y", "/tmp/y.part", cfg)
         assert cmd[0] == "wget"
         assert any(a.startswith("--ca-certificate=") for a in cmd)
@@ -286,8 +325,9 @@ class TestRustStub:
 class TestDownloadMocked:
     def test_curl_download_success(self, tmp_path, ca_bundle):
         strat = CurlStrategy(environ={}, candidates=())
-        cfg = CryptoConfig(strategy="curl", ca_bundle_path=str(ca_bundle),
-                           ca_bundle_exists=True)
+        cfg = CryptoConfig(
+            strategy="curl", ca_bundle_path=str(ca_bundle), ca_bundle_exists=True
+        )
         dest = str(tmp_path / "out.bin")
 
         def fake_run(cmd, **kwargs):
@@ -296,8 +336,9 @@ class TestDownloadMocked:
             Path(part).write_bytes(b"payload")
             return Mock(returncode=0, stdout="", stderr="")
 
-        with patch.object(strat, "executable", return_value="/usr/bin/curl"), \
-             patch("subprocess.run", side_effect=fake_run):
+        with patch.object(strat, "executable", return_value="/usr/bin/curl"), patch(
+            "subprocess.run", side_effect=fake_run
+        ):
             rc = strat.download("https://x/out.bin", dest, cfg)
         assert rc == 0
         assert Path(dest).read_bytes() == b"payload"
@@ -305,8 +346,9 @@ class TestDownloadMocked:
 
     def test_curl_download_failure_cleans_part(self, tmp_path, ca_bundle):
         strat = CurlStrategy(environ={}, candidates=())
-        cfg = CryptoConfig(strategy="curl", ca_bundle_path=str(ca_bundle),
-                           ca_bundle_exists=True)
+        cfg = CryptoConfig(
+            strategy="curl", ca_bundle_path=str(ca_bundle), ca_bundle_exists=True
+        )
         dest = str(tmp_path / "out.bin")
 
         def fake_run(cmd, **kwargs):
@@ -314,8 +356,9 @@ class TestDownloadMocked:
             Path(part).write_bytes(b"partial")
             return Mock(returncode=22, stdout="", stderr="404")
 
-        with patch.object(strat, "executable", return_value="/usr/bin/curl"), \
-             patch("subprocess.run", side_effect=fake_run):
+        with patch.object(strat, "executable", return_value="/usr/bin/curl"), patch(
+            "subprocess.run", side_effect=fake_run
+        ):
             with pytest.raises(FetchError):
                 strat.download("https://x/out.bin", dest, cfg)
         assert not Path(dest + ".part").exists()
@@ -338,9 +381,11 @@ class TestFetchOrchestration:
     def test_crypto_only_no_download(self, ca_bundle):
         env = {"CURL_CA_BUNDLE": str(ca_bundle)}
         strat = get_strategy("curl", environ=env, candidates=())
-        with patch.object(CurlStrategy, "executable", return_value="/usr/bin/curl"), \
-             patch.object(CurlStrategy, "version_text",
-                          return_value="curl 8.15.0 OpenSSL/3.5.4"):
+        with patch.object(
+            CurlStrategy, "executable", return_value="/usr/bin/curl"
+        ), patch.object(
+            CurlStrategy, "version_text", return_value="curl 8.15.0 OpenSSL/3.5.4"
+        ):
             result = fetch(
                 "https://x/y",
                 strategy="curl",
@@ -355,6 +400,7 @@ class TestFetchOrchestration:
     def test_full_fetch_via_file_url(self, tmp_path, ca_bundle):
         # Use a real curl file:// download if curl is available.
         import shutil
+
         if shutil.which("curl") is None:
             pytest.skip("curl not available")
         src = tmp_path / "src.txt"
@@ -376,9 +422,11 @@ class TestFetchOrchestration:
 class TestCli:
     def test_crypto_only_cli(self, capsys, ca_bundle, monkeypatch):
         monkeypatch.setenv("CURL_CA_BUNDLE", str(ca_bundle))
-        with patch.object(CurlStrategy, "executable", return_value="/usr/bin/curl"), \
-             patch.object(CurlStrategy, "version_text",
-                          return_value="curl 8.15.0 OpenSSL/3.5.4"):
+        with patch.object(
+            CurlStrategy, "executable", return_value="/usr/bin/curl"
+        ), patch.object(
+            CurlStrategy, "version_text", return_value="curl 8.15.0 OpenSSL/3.5.4"
+        ):
             rc = main(["--crypto-only", "--curl", "--json"])
         out = capsys.readouterr().out
         assert rc == 0
@@ -421,7 +469,9 @@ class TestProvenance:
 
     def test_verify_detects_tampering(self, tmp_path):
         backend = FileKeyBackend(bytes(range(1, 33)))
-        prov = sign_provenance(build_provenance(_result_for_provenance(tmp_path)), backend)
+        prov = sign_provenance(
+            build_provenance(_result_for_provenance(tmp_path)), backend
+        )
         prov["credentialSubject"]["sha256"] = "tampered"
         assert verify_provenance(prov) is False
 
@@ -440,6 +490,7 @@ class TestProvenance:
 
     def test_fetch_writes_signed_sidecar_via_file_backend(self, tmp_path, ca_bundle):
         import shutil
+
         if shutil.which("curl") is None:
             pytest.skip("curl not available")
         src = tmp_path / "src.txt"
@@ -470,6 +521,7 @@ class TestCache:
             _url_host,
             default_cache_dir,
         )
+
         cdir = str(tmp_path / "cache")
         out = cache_output_path(cdir, "https://example.com/path/file.tar.gz?x=1")
         assert out.endswith("/cache/example.com/file.tar.gz")
@@ -481,6 +533,7 @@ class TestCache:
 
     def test_cache_download_writes_signed_meta_and_index(self, tmp_path, ca_bundle):
         import shutil
+
         if shutil.which("curl") is None:
             pytest.skip("curl not available")
         from tert.fetch import query_ls, query_show, default_cache_dir
@@ -515,6 +568,7 @@ class TestCache:
 
     def test_cache_copies_to_dest(self, tmp_path, ca_bundle):
         import shutil
+
         if shutil.which("curl") is None:
             pytest.skip("curl not available")
         src = tmp_path / "artifact.bin"
@@ -539,9 +593,11 @@ class TestCache:
 class TestFetchRunner:
     def test_runner_registers_downloaded_artifact(self, tmp_path):
         import shutil
+
         if shutil.which("curl") is None:
             pytest.skip("curl not available")
         from tert.run_tests import FetchRunner
+
         src = tmp_path / "src.txt"
         src.write_text("runner payload")
         out = tmp_path / "report"
@@ -556,25 +612,32 @@ class TestFetchRunner:
 
     def test_runner_in_known_runners(self):
         from tert.run_tests import get_runner, FetchRunner
+
         assert isinstance(get_runner("fetch", Path("/tmp/x")), FetchRunner)
 
     def test_fetch_records_run_and_artifact_by_default(self, tmp_path):
         import shutil
+
         if shutil.which("curl") is None:
             pytest.skip("curl not available")
         from tert.fetch import main as fetch_main
         from tert.run_tests import ReplogDB, query_runs, query_artifacts
+
         src = tmp_path / "logged.txt"
         src.write_text("log this download")
         reports = tmp_path / "reports"
         db = reports / "replog.db"
         dest = tmp_path / "out.txt"
-        rc = fetch_main([
-            "--reports-dir", str(reports),
-            "--replog-db", str(db),
-            src.as_uri(),
-            str(dest),
-        ])
+        rc = fetch_main(
+            [
+                "--reports-dir",
+                str(reports),
+                "--replog-db",
+                str(db),
+                src.as_uri(),
+                str(dest),
+            ]
+        )
         assert rc == 0
         runs = query_runs(ReplogDB(db))
         assert len(runs) == 1
@@ -584,19 +647,24 @@ class TestFetchRunner:
 
     def test_no_record_skips_replog(self, tmp_path):
         import shutil
+
         if shutil.which("curl") is None:
             pytest.skip("curl not available")
         from tert.fetch import main as fetch_main
+
         src = tmp_path / "plain.txt"
         src.write_text("no replog please")
         reports = tmp_path / "reports"
         dest = tmp_path / "out.txt"
-        rc = fetch_main([
-            "--no-record",
-            "--reports-dir", str(reports),
-            src.as_uri(),
-            str(dest),
-        ])
+        rc = fetch_main(
+            [
+                "--no-record",
+                "--reports-dir",
+                str(reports),
+                src.as_uri(),
+                str(dest),
+            ]
+        )
         assert rc == 0
         assert dest.exists()
         # No report directory created when recording is disabled.
@@ -605,22 +673,28 @@ class TestFetchRunner:
     def test_json_still_records(self, tmp_path, capsys):
         import shutil
         import json as _json
+
         if shutil.which("curl") is None:
             pytest.skip("curl not available")
         from tert.fetch import main as fetch_main
         from tert.run_tests import ReplogDB, query_runs
+
         src = tmp_path / "j.txt"
         src.write_text("json and record")
         reports = tmp_path / "reports"
         db = reports / "replog.db"
         dest = tmp_path / "out.txt"
-        rc = fetch_main([
-            "--json",
-            "--reports-dir", str(reports),
-            "--replog-db", str(db),
-            src.as_uri(),
-            str(dest),
-        ])
+        rc = fetch_main(
+            [
+                "--json",
+                "--reports-dir",
+                str(reports),
+                "--replog-db",
+                str(db),
+                src.as_uri(),
+                str(dest),
+            ]
+        )
         out = capsys.readouterr().out
         assert rc == 0
         # --json emitted the FetchResult ...
@@ -629,6 +703,3 @@ class TestFetchRunner:
         assert payload["dest"].endswith("out.txt")
         # ... and the run was still recorded.
         assert len(query_runs(ReplogDB(db))) == 1
-
-
-

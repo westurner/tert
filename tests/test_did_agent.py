@@ -1,4 +1,5 @@
 """Pytest tests for tert.did_agent."""
+
 import base64
 import os
 import socket
@@ -181,6 +182,7 @@ class TestClientErrors:
 class TestCli:
     def test_client_actions_via_running_agent(self, running_agent, capsys):
         from tert.did_agent import main
+
         client, agent = running_agent
         rc = main(["did", "--sock", client.sock_path])
         out = capsys.readouterr().out.strip()
@@ -189,6 +191,7 @@ class TestCli:
 
     def test_sign_action(self, running_agent, capsys):
         from tert.did_agent import main
+
         client, agent = running_agent
         rc = main(["sign", "hello", "--sock", client.sock_path])
         out = capsys.readouterr().out.strip()

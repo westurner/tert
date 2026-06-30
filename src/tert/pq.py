@@ -447,7 +447,9 @@ def _sk_decode(sk: bytes):
     t0_stride = 32 * t0_bl
     t0 = []
     for _ in range(ML_K):
-        t0.append(_bit_unpack(sk[off : off + t0_stride], (1 << (D - 1)) - 1, 1 << (D - 1)))
+        t0.append(
+            _bit_unpack(sk[off : off + t0_stride], (1 << (D - 1)) - 1, 1 << (D - 1))
+        )
         off += t0_stride
     return rho, key, tr, s1, s2, t0
 
@@ -577,7 +579,10 @@ def mldsa87_sign(sk: bytes, message: bytes, ctx: bytes = b"") -> bytes:
         if max(_inf_norm(p) for p in z) >= ML_GAMMA1 - ML_BETA:
             continue
         w_minus_cs2 = [_poly_sub(w[i], cs2[i]) for i in range(ML_K)]
-        if max(_inf_norm([_low_bits(c2) for c2 in poly]) for poly in w_minus_cs2) >= ML_GAMMA2 - ML_BETA:
+        if (
+            max(_inf_norm([_low_bits(c2) for c2 in poly]) for poly in w_minus_cs2)
+            >= ML_GAMMA2 - ML_BETA
+        ):
             continue
         ct0 = [_intt(_poly_pointwise(c_hat, th)) for th in t0_hat]
         if max(_inf_norm(p) for p in ct0) >= ML_GAMMA2:
@@ -852,7 +857,9 @@ def hash_assertion(issuer: bytes, batch: int, index: int, assertion: bytes) -> b
 
 
 def hash_node(issuer: bytes, batch: int, left: bytes, right: bytes) -> bytes:
-    return _sha256(bytes([_D_NODE]), _u32(len(issuer)), issuer, _u32(batch), left, right)
+    return _sha256(
+        bytes([_D_NODE]), _u32(len(issuer)), issuer, _u32(batch), left, right
+    )
 
 
 class MerkleTree:
@@ -878,7 +885,9 @@ class MerkleTree:
             i = 0
             while i < len(level):
                 if i + 1 < len(level):
-                    nxt.append(hash_node(self.issuer, self.batch, level[i], level[i + 1]))
+                    nxt.append(
+                        hash_node(self.issuer, self.batch, level[i], level[i + 1])
+                    )
                     i += 2
                 else:
                     nxt.append(level[i])
@@ -901,7 +910,9 @@ class MerkleTree:
                         proof.append((True, level[i + 1]))
                     elif i + 1 == idx:
                         proof.append((False, level[i]))
-                    nxt.append(hash_node(self.issuer, self.batch, level[i], level[i + 1]))
+                    nxt.append(
+                        hash_node(self.issuer, self.batch, level[i], level[i + 1])
+                    )
                     i += 2
                 else:
                     nxt.append(level[i])
@@ -912,7 +923,11 @@ class MerkleTree:
 
 
 def fold_inclusion(
-    issuer: bytes, batch: int, index: int, assertion: bytes, proof: List[Tuple[bool, bytes]]
+    issuer: bytes,
+    batch: int,
+    index: int,
+    assertion: bytes,
+    proof: List[Tuple[bool, bytes]],
 ) -> bytes:
     node = hash_assertion(issuer, batch, index, assertion)
     for sibling_on_right, sibling in proof:
@@ -923,7 +938,9 @@ def fold_inclusion(
     return node
 
 
-def treehead_signing_input(issuer: bytes, batch: int, tree_size: int, root: bytes) -> bytes:
+def treehead_signing_input(
+    issuer: bytes, batch: int, tree_size: int, root: bytes
+) -> bytes:
     return (
         b"MerkleTreeCRT:treehead:v1"
         + _u32(len(issuer))
@@ -958,7 +975,15 @@ def encode_mtc(
 
 
 class DecodedMtc:
-    __slots__ = ("issuer", "batch", "tree_size", "index", "root", "treehead_sig", "proof")
+    __slots__ = (
+        "issuer",
+        "batch",
+        "tree_size",
+        "index",
+        "root",
+        "treehead_sig",
+        "proof",
+    )
 
     def __init__(self, issuer, batch, tree_size, index, root, treehead_sig, proof):
         self.issuer = issuer
@@ -982,7 +1007,13 @@ def decode_mtc(blob: bytes) -> Optional[DecodedMtc]:
     index = r.u64()
     root = r.take(32)
     treehead_sig = r.bytes()
-    if batch is None or tree_size is None or index is None or root is None or treehead_sig is None:
+    if (
+        batch is None
+        or tree_size is None
+        or index is None
+        or root is None
+        or treehead_sig is None
+    ):
         return None
     n = r.u16()
     if n is None:

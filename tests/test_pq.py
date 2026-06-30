@@ -232,13 +232,20 @@ class TestHybrid:
 # Cross-language interop with the Rust `vc` binary
 # ---------------------------------------------------------------------------
 
-_VCBIN = os.path.join(os.path.dirname(os.path.dirname(__file__)), "target", "debug", "vc")
+_VCBIN = os.path.join(
+    os.path.dirname(os.path.dirname(__file__)), "target", "debug", "vc"
+)
 _FIXTURES = os.path.join(os.path.dirname(__file__), "fixtures")
 
 SAMPLE = {
     "@context": ["https://www.w3.org/ns/credentials/v2"],
     "type": ["VerifiableCredential"],
-    "credentialSubject": {"id": "urn:example:1", "name": "Ada", "n": 7, "u": "caf\u00e9 \u2603"},
+    "credentialSubject": {
+        "id": "urn:example:1",
+        "name": "Ada",
+        "n": 7,
+        "u": "caf\u00e9 \u2603",
+    },
 }
 
 
@@ -270,7 +277,9 @@ class TestInterop:
         assert vc.verify_document(signed) is True
         path = tmp_path / "py_signed.json"
         path.write_text(json.dumps(signed))
-        out = subprocess.run([_VCBIN, "verify", str(path)], capture_output=True, text=True)
+        out = subprocess.run(
+            [_VCBIN, "verify", str(path)], capture_output=True, text=True
+        )
         assert out.returncode == 0, out.stderr
         assert "OK" in out.stdout
 
@@ -281,9 +290,19 @@ class TestInterop:
         doc_path.write_text(json.dumps(SAMPLE))
         signed_path = tmp_path / "rust_signed.json"
         out = subprocess.run(
-            [_VCBIN, "sign", "--cryptosuite", suite, "--keys-dir", keys,
-             "-o", str(signed_path), str(doc_path)],
-            capture_output=True, text=True,
+            [
+                _VCBIN,
+                "sign",
+                "--cryptosuite",
+                suite,
+                "--keys-dir",
+                keys,
+                "-o",
+                str(signed_path),
+                str(doc_path),
+            ],
+            capture_output=True,
+            text=True,
         )
         assert out.returncode == 0, out.stderr
         signed = json.loads(signed_path.read_text())
