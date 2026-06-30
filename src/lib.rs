@@ -5,6 +5,7 @@
 
 pub mod shellwrap;
 pub mod run_tests;
+pub mod fetch;
 
 use pyo3::prelude::*;
 use regex::Regex;

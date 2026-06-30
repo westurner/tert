@@ -939,9 +939,15 @@ def main():
         print("Error: Cannot run run_tests from within pytest (recursion protection)", file=sys.stderr)
         print("       Tests must use mocking instead of calling main()", file=sys.stderr)
         return 1
-    
+
+    # The ``fetch`` subcommand has its own argument parser; delegate to it before
+    # the test-runner argv preprocessing below.
+    if sys.argv[1:2] == ["fetch"]:
+        from .fetch import main as fetch_main
+        return fetch_main(sys.argv[2:])
+
     known_runners = ["pytest", "cargo", "go", "jest", "vitest", "tox", "sh", "bash", "zsh", "python", "ipython"]
-    known_commands = ["run", "ls", "show", "query"]
+    known_commands = ["run", "ls", "show", "query", "fetch"]
     command_aliases = {"q": "query", "l": "ls", "s": "show"}
     subquery_aliases = {"l": "lines", "a": "artifacts", "r": "runs", "lines": "coverage-lines"}
     subquery_normalized = {"coverage-lines": "coverage-lines", "lines": "coverage-lines"}

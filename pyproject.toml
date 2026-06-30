@@ -38,6 +38,7 @@ dev = [
 [project.scripts]
 tert = "tert.run_tests:main"
 tert-shellwrap = "tert.shellwrap:main"
+tert-fetch = "tert.fetch:main"
 
 [tool.maturin]
 python-source = "src"

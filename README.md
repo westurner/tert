@@ -45,6 +45,33 @@ tert q a  # query artifacts
 tert q l  # query coverage-lines
 ```
 
+#### Fetching URLs with verified TLS configuration
+
+```bash
+# Download with the default strategy (curl if available, else wget)
+tert fetch https://example.com/file.tar.gz
+
+# Force a specific strategy
+tert fetch --curl https://example.com/file.tar.gz
+tert fetch --wget https://example.com/file.tar.gz
+tert fetch --rust https://example.com/file.tar.gz   # stub: not yet implemented
+
+# Only discover, log and verify the crypto config (no download)
+tert fetch --crypto-only --curl
+tert fetch --crypto-only --rust --json
+```
+
+For every strategy, `tert fetch` discovers, logs and verifies the active TLS
+crypto configuration before downloading:
+
+- the TLS backend (OpenSSL / GnuTLS / rustls / ...)
+- the CA certificate bundle path and where it came from (env var vs system default)
+- the CA bundle size, certificate count, and sha256 digest
+
+A download is refused when the crypto configuration cannot be verified (pass
+`--no-verify-crypto` to override). The `--rust` strategy is a stub that reports
+and verifies its intended crypto config but does not yet download.
+
 #### As a Python Library
 
 ```python
@@ -134,6 +161,7 @@ SQLite database storing:
 ### CLI Commands
 
 - `run` [options]: Execute a test suite and record results
+- `fetch` <url> [dest]: Download a URL with a selectable strategy (`--curl`, `--wget`, `--rust`), logging and verifying the TLS crypto config and CA cert bundle
 - `ls` [args]: List report directories
 - `show` [reportdir]: Display contents of a report
 - `query` {runs|artifacts|coverage-lines}: Query the replog database
