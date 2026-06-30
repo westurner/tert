@@ -4,9 +4,10 @@
 //! - Deterministic canonicalization (JCS-style subset: sorted keys, compact,
 //!   `ensure_ascii`) producing bytes identical to the Python implementation.
 //! - A pluggable cryptosuite abstraction:
-//!     * `eddsa-jcs-2022`    - Ed25519 over canonical JSON (implemented)
-//!     * `mldsa-87-p256`     - post-quantum hybrid (stub)
-//!     * `merkle-tree-certs` - Merkle Tree Certificates (stub)
+//!     * `eddsa-jcs-2022`    - Ed25519 over canonical JSON
+//!     * `mldsa-87-p256`     - ML-DSA-87 (FIPS 204) + ECDSA-P256 hybrid
+//!     * `merkle-tree-certs` - Merkle Tree Certificates (signed tree head +
+//!       inclusion proof; see `crate::pq`)
 //! - JSON and YAML (YAML-LD) document IO via serde.
 
 use serde_json::{json, Map, Value};
@@ -117,6 +118,12 @@ pub fn canonicalize(value: &Value) -> Vec<u8> {
 pub trait Signer {
     fn did(&self) -> Result<String, VcError>;
     fn sign(&self, data: &[u8]) -> Result<Vec<u8>, VcError>;
+    /// The raw 32-byte Ed25519 seed, when the backend can expose it. Required
+    /// to derive the ML-DSA-87 / P-256 component keys for `mldsa-87-p256`;
+    /// agent-backed signers return `None`.
+    fn key_seed(&self) -> Option<[u8; 32]> {
+        None
+    }
 }
 
 /// Signs with an in-memory Ed25519 seed (loaded from / stored to disk).
@@ -167,6 +174,9 @@ impl Signer for FileKey {
     fn sign(&self, data: &[u8]) -> Result<Vec<u8>, VcError> {
         Ok(ed_sign(&self.seed, data).to_vec())
     }
+    fn key_seed(&self) -> Option<[u8; 32]> {
+        Some(self.seed)
+    }
 }
 
 /// Signs through a running did-agent (private key never leaves the agent).
@@ -216,7 +226,8 @@ impl Cryptosuite {
     }
 
     pub fn available(&self) -> bool {
-        matches!(self, Cryptosuite::EddsaJcs2022)
+        // All three cryptosuites are now implemented.
+        true
     }
 
     pub fn from_name(name: &str) -> Result<Cryptosuite, VcError> {
@@ -231,16 +242,47 @@ impl Cryptosuite {
     fn sign(&self, payload: &[u8], signer: &dyn Signer) -> Result<String, VcError> {
         match self {
             Cryptosuite::EddsaJcs2022 => Ok(base64_encode(&signer.sign(payload)?)),
-            Cryptosuite::MldsaP256 => Err(VcError::UnsupportedStub(
-                "cryptosuite 'mldsa-87-p256' is a stub: ML-DSA-87 (FIPS 204) post-quantum \
-                 signing is not yet implemented"
-                    .to_string(),
-            )),
-            Cryptosuite::MerkleTreeCerts => Err(VcError::UnsupportedStub(
-                "cryptosuite 'merkle-tree-certs' is a stub: Merkle Tree Certificates are not \
-                 yet implemented"
-                    .to_string(),
-            )),
+            Cryptosuite::MldsaP256 => {
+                let seed = signer.key_seed().ok_or_else(|| {
+                    VcError::NoKey(
+                        "cryptosuite 'mldsa-87-p256' needs a file key seed; agent signing is \
+                         not supported for hybrid post-quantum keys"
+                            .to_string(),
+                    )
+                })?;
+                let key = crate::pq::HybridKey::from_seed(&seed)
+                    .map_err(VcError::UnsupportedStub)?;
+                let blob = key.sign(&seed, payload).map_err(VcError::UnsupportedStub)?;
+                Ok(base64_encode(&blob))
+            }
+            Cryptosuite::MerkleTreeCerts => {
+                // Issue a single-certificate batch: build a one-leaf Merkle
+                // tree, sign its head, and emit the (empty) inclusion proof.
+                let issuer = signer.did()?;
+                let issuer_b = issuer.as_bytes();
+                let batch: u32 = 0;
+                let assertions = vec![payload.to_vec()];
+                let tree = crate::pq::MerkleTree::build(issuer_b, batch, &assertions);
+                let root = tree.root();
+                let proof = tree.inclusion_proof(0).unwrap_or_default();
+                let signing_input = crate::pq::treehead_signing_input(
+                    issuer_b,
+                    batch,
+                    tree.size() as u64,
+                    &root,
+                );
+                let treehead_sig = signer.sign(&signing_input)?;
+                let blob = crate::pq::encode_mtc(
+                    issuer_b,
+                    batch,
+                    tree.size() as u64,
+                    0,
+                    &root,
+                    &treehead_sig,
+                    &proof,
+                );
+                Ok(base64_encode(&blob))
+            }
         }
     }
 
@@ -259,10 +301,48 @@ impl Cryptosuite {
                 sig_arr.copy_from_slice(&sig);
                 Ok(ed_verify(&pk, payload, &sig_arr))
             }
-            _ => Err(VcError::UnsupportedStub(format!(
-                "cryptosuite '{}' verification is a stub",
-                self.name()
-            ))),
+            Cryptosuite::MldsaP256 => {
+                let blob = match base64_decode(proof_value) {
+                    Some(b) => b,
+                    None => return Ok(false),
+                };
+                Ok(crate::pq::hybrid_verify(&blob, payload))
+            }
+            Cryptosuite::MerkleTreeCerts => {
+                let blob = match base64_decode(proof_value) {
+                    Some(b) => b,
+                    None => return Ok(false),
+                };
+                let dec = match crate::pq::decode_mtc(&blob) {
+                    Some(d) => d,
+                    None => return Ok(false),
+                };
+                // The certificate's issuer must match the embedded batch issuer.
+                if dec.issuer != issuer_did.as_bytes() {
+                    return Ok(false);
+                }
+                // 1) The inclusion proof must reproduce the certified tree head.
+                if crate::pq::mtc_recompute_root(&dec, payload) != dec.root {
+                    return Ok(false);
+                }
+                // 2) The batch signature over that tree head must verify.
+                let pk = match pubkey_from_did_key(issuer_did) {
+                    Some(pk) => pk,
+                    None => return Ok(false),
+                };
+                if dec.treehead_sig.len() != 64 {
+                    return Ok(false);
+                }
+                let mut sig_arr = [0u8; 64];
+                sig_arr.copy_from_slice(&dec.treehead_sig);
+                let signing_input = crate::pq::treehead_signing_input(
+                    &dec.issuer,
+                    dec.batch,
+                    dec.tree_size,
+                    &dec.root,
+                );
+                Ok(ed_verify(&pk, &signing_input, &sig_arr))
+            }
         }
     }
 }
@@ -627,18 +707,54 @@ mod tests {
     }
 
     #[test]
-    fn test_pq_stub_errors() {
+    fn test_mldsa_p256_sign_and_verify() {
         let key = FileKey::new(FIXED_SEED);
-        let doc = json!({"a": 1});
-        let err = sign_document(&doc, &key, "mldsa-87-p256", None).unwrap_err();
-        assert!(matches!(err, VcError::UnsupportedStub(_)));
+        let doc = json!({
+            "@context": ["https://www.w3.org/ns/credentials/v2"],
+            "type": ["VerifiableCredential"],
+            "credentialSubject": {"id": "urn:example:1", "name": "Ada", "count": 3}
+        });
+        let signed = sign_document(&doc, &key, "mldsa-87-p256", None).unwrap();
+        assert_eq!(signed["proof"]["cryptosuite"], "mldsa-87-p256");
+        assert!(verify_document(&signed));
+    }
+
+    #[test]
+    fn test_mldsa_p256_detects_tamper() {
+        let key = FileKey::new(FIXED_SEED);
+        let doc = json!({"credentialSubject": {"name": "Ada"}});
+        let mut signed = sign_document(&doc, &key, "mldsa-87-p256", None).unwrap();
+        signed["credentialSubject"]["name"] = json!("Eve");
+        assert!(!verify_document(&signed));
+    }
+
+    #[test]
+    fn test_merkle_tree_certs_sign_and_verify() {
+        let key = FileKey::new(FIXED_SEED);
+        let doc = json!({
+            "@context": ["https://www.w3.org/ns/credentials/v2"],
+            "type": ["VerifiableCredential"],
+            "credentialSubject": {"id": "urn:example:1", "name": "Ada"}
+        });
+        let signed = sign_document(&doc, &key, "merkle-tree-certs", None).unwrap();
+        assert_eq!(signed["proof"]["cryptosuite"], "merkle-tree-certs");
+        assert!(verify_document(&signed));
+    }
+
+    #[test]
+    fn test_merkle_tree_certs_detects_tamper() {
+        let key = FileKey::new(FIXED_SEED);
+        let doc = json!({"credentialSubject": {"name": "Ada"}});
+        let mut signed = sign_document(&doc, &key, "merkle-tree-certs", None).unwrap();
+        signed["credentialSubject"]["name"] = json!("Eve");
+        assert!(!verify_document(&signed));
     }
 
     #[test]
     fn test_cryptosuite_availability() {
         assert!(Cryptosuite::EddsaJcs2022.available());
-        assert!(!Cryptosuite::MldsaP256.available());
-        assert!(!Cryptosuite::MerkleTreeCerts.available());
+        assert!(Cryptosuite::MldsaP256.available());
+        assert!(Cryptosuite::MerkleTreeCerts.available());
     }
 
     // Cross-language interop: this document was signed by the Python tert.vc
@@ -648,6 +764,26 @@ mod tests {
     fn test_verify_python_signed_document() {
         let text = include_str!("../tests/fixtures/vc_interop.json");
         let doc: Value = serde_json::from_str(text).unwrap();
+        assert!(verify_document(&doc));
+    }
+
+    // Cross-language interop for the post-quantum suites: these documents were
+    // signed by the pure-Python tert.pq implementation (hybrid ML-DSA-87 +
+    // ECDSA-P256, and Merkle Tree Certificates). Rust must verify them, proving
+    // the FIPS 204 / P-256 / Merkle wire encodings are byte-compatible.
+    #[test]
+    fn test_verify_python_signed_mldsa_p256() {
+        let text = include_str!("../tests/fixtures/vc_mldsa_interop.json");
+        let doc: Value = serde_json::from_str(text).unwrap();
+        assert_eq!(doc["proof"]["cryptosuite"], "mldsa-87-p256");
+        assert!(verify_document(&doc));
+    }
+
+    #[test]
+    fn test_verify_python_signed_merkle_tree_certs() {
+        let text = include_str!("../tests/fixtures/vc_mtc_interop.json");
+        let doc: Value = serde_json::from_str(text).unwrap();
+        assert_eq!(doc["proof"]["cryptosuite"], "merkle-tree-certs");
         assert!(verify_document(&doc));
     }
 

@@ -18,6 +18,13 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = "0.9"
 toml = "0.9"
+# Post-quantum + classical crypto for the mldsa-87-p256 and merkle-tree-certs
+# cryptosuites. Hand-rolling ML-DSA-87 (FIPS 204) is infeasible to do safely, so
+# audited pure-Rust implementations are used.
+fips204 = "0.4"
+p256 = { version = "0.13", features = ["ecdsa"] }
+sha2 = "0.10"
+rand_core = "0.6"
 
 [lib]
 name = "tert"

@@ -1,4 +1,5 @@
 """Pytest tests for tert.vc (Verifiable Credential signing)."""
+import copy
 import json
 
 import pytest
@@ -52,9 +53,9 @@ class TestCryptosuites:
         assert DEFAULT_CRYPTOSUITE == "eddsa-jcs-2022"
         assert get_cryptosuite("eddsa-jcs-2022").available is True
 
-    def test_pq_and_mtc_are_stubs(self):
-        assert get_cryptosuite("mldsa-87-p256").available is False
-        assert get_cryptosuite("merkle-tree-certs").available is False
+    def test_pq_and_mtc_are_available(self):
+        assert get_cryptosuite("mldsa-87-p256").available is True
+        assert get_cryptosuite("merkle-tree-certs").available is True
 
     def test_unknown_raises(self):
         with pytest.raises(CryptosuiteError):
@@ -85,9 +86,21 @@ class TestSignVerify:
         signed["proof"]["cryptosuite"] = "bogus"
         assert verify_document(signed) is False
 
-    def test_sign_with_pq_stub_raises(self, backend):
-        with pytest.raises(CryptosuiteError):
-            sign_document(SAMPLE_DOC, backend, cryptosuite="mldsa-87-p256")
+    def test_sign_and_verify_mldsa_p256(self, backend):
+        doc = copy.deepcopy(SAMPLE_DOC)
+        signed = sign_document(doc, backend, cryptosuite="mldsa-87-p256")
+        assert signed["proof"]["cryptosuite"] == "mldsa-87-p256"
+        assert verify_document(signed) is True
+        signed["credentialSubject"]["name"] = "Eve the impostor"
+        assert verify_document(signed) is False
+
+    def test_sign_and_verify_merkle_tree_certs(self, backend):
+        doc = copy.deepcopy(SAMPLE_DOC)
+        signed = sign_document(doc, backend, cryptosuite="merkle-tree-certs")
+        assert signed["proof"]["cryptosuite"] == "merkle-tree-certs"
+        assert verify_document(signed) is True
+        signed["credentialSubject"]["name"] = "Eve the impostor"
+        assert verify_document(signed) is False
 
     def test_signature_is_deterministic(self, backend):
         s1 = sign_document(SAMPLE_DOC, backend, created="2020-01-01T00:00:00Z")
@@ -178,11 +191,15 @@ class TestCli:
         names = {r["name"] for r in rows}
         assert "mldsa-87-p256" in names
 
-    def test_sign_with_stub_cryptosuite_fails(self, tmp_path, capsys):
+    def test_sign_with_mldsa_cryptosuite_cli(self, tmp_path, capsys):
         from tert.vc import main
         keys = tmp_path / "keys"
         doc_path = tmp_path / "doc.json"
+        out_path = tmp_path / "signed.json"
         doc_path.write_text(json.dumps(SAMPLE_DOC))
         rc = main(["sign", str(doc_path), "--keys-dir", str(keys),
-                   "--cryptosuite", "mldsa-87-p256"])
-        assert rc == 2
+                   "--cryptosuite", "mldsa-87-p256", "-o", str(out_path)])
+        assert rc == 0
+        rc = main(["verify", str(out_path)])
+        assert capsys.readouterr().out.strip().endswith("OK")
+        assert rc == 0

@@ -9,9 +9,10 @@ artifact summaries, and the standalone ``tert vc`` CLI:
       ``ensure_ascii``) used as the signing payload. The Python and Rust
       (``tert::vc``) implementations produce byte-identical canonical bytes.
     - A pluggable *cryptosuite* abstraction:
-        * ``eddsa-jcs-2022``   - Ed25519 over canonical JSON (implemented)
-        * ``mldsa-87-p256``    - post-quantum hybrid ML-DSA-87 + ECDSA-P256 (stub)
-        * ``merkle-tree-certs``- Merkle Tree Certificates (stub)
+        * ``eddsa-jcs-2022``   - Ed25519 over canonical JSON
+        * ``mldsa-87-p256``    - hybrid ML-DSA-87 (FIPS 204) + ECDSA-P256
+        * ``merkle-tree-certs``- Merkle Tree Certificates (signed tree head +
+          inclusion proof; see :mod:`tert.pq`)
     - Key backends: a did-agent (key in memory) or an on-disk Ed25519 key.
 
 Documents are W3C Verifiable Credentials with a ``DataIntegrityProof``. Both
@@ -34,6 +35,7 @@ from .crypto import (
     did_key_from_pubkey,
     pubkey_from_did_key,
 )
+from . import pq
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +79,14 @@ class KeyBackend:
     def sign(self, data: bytes) -> bytes:
         raise NotImplementedError
 
+    def key_seed(self) -> Optional[bytes]:
+        """The raw 32-byte Ed25519 seed when the backend can expose it.
+
+        Required to derive the ML-DSA-87 / P-256 component keys for the
+        ``mldsa-87-p256`` cryptosuite; agent-backed signers return ``None``.
+        """
+        return None
+
 
 class AgentKeyBackend(KeyBackend):
     """Signs through a running did-agent; the private key never touches disk."""
@@ -111,6 +121,9 @@ class FileKeyBackend(KeyBackend):
 
     def sign(self, data: bytes) -> bytes:
         return ed25519_sign(self._seed, data, self._pubkey)
+
+    def key_seed(self) -> Optional[bytes]:
+        return self._seed
 
     @classmethod
     def load_or_create(cls, keys_dir: str) -> "FileKeyBackend":
@@ -201,41 +214,72 @@ class EddsaJcs2022(Cryptosuite):
         return ed25519_verify(pubkey, payload, sig)
 
 
-class MldsaP256Stub(Cryptosuite):
-    """Post-quantum hybrid ML-DSA-87 + ECDSA-P256 (stub; not yet implemented)."""
+class MldsaP256(Cryptosuite):
+    """Hybrid (composite) ML-DSA-87 (FIPS 204) + ECDSA-P256 signature.
+
+    A verifier must accept *both* component signatures, so the suite stays
+    secure as long as either algorithm is unbroken. The component public keys
+    and signatures travel inside the ``proofValue`` blob (wire-compatible with
+    the Rust ``tert::pq`` implementation).
+    """
 
     name = "mldsa-87-p256"
-    available = False
+    available = True
 
     def sign(self, payload: bytes, signer: KeyBackend) -> str:
-        raise CryptosuiteError(
-            "cryptosuite 'mldsa-87-p256' is a stub: ML-DSA-87 (FIPS 204) post-quantum "
-            "signing is not yet implemented"
-        )
+        seed = signer.key_seed()
+        if seed is None:
+            raise CryptosuiteError(
+                "cryptosuite 'mldsa-87-p256' needs a file key seed; agent signing "
+                "is not supported for hybrid post-quantum keys"
+            )
+        return base64.b64encode(pq.hybrid_sign(seed, payload)).decode("ascii")
 
     def verify(self, payload: bytes, proof_value: str, issuer_did: str) -> bool:
-        raise CryptosuiteError("cryptosuite 'mldsa-87-p256' verification is a stub")
+        return pq.hybrid_verify(base64.b64decode(proof_value), payload)
 
 
-class MerkleTreeCertsStub(Cryptosuite):
-    """Merkle Tree Certificates (stub; planned)."""
+class MerkleTreeCerts(Cryptosuite):
+    """Merkle Tree Certificates (draft-davidben-tls-merkle-tree-certs).
+
+    The issuer builds a single-certificate batch: a one-leaf Merkle tree whose
+    head it signs with its Ed25519 ``did:key``. The ``proofValue`` carries the
+    signed tree head plus the (empty) inclusion proof; verification recomputes
+    the head from the assertion and checks the batch signature.
+    """
 
     name = "merkle-tree-certs"
-    available = False
+    available = True
 
     def sign(self, payload: bytes, signer: KeyBackend) -> str:
-        raise CryptosuiteError(
-            "cryptosuite 'merkle-tree-certs' is a stub: Merkle Tree Certificates are "
-            "not yet implemented"
-        )
+        issuer = signer.did().encode("utf-8")
+        batch = 0
+        tree = pq.MerkleTree(issuer, batch, [payload])
+        root = tree.root()
+        proof = tree.inclusion_proof(0) or []
+        signing_input = pq.treehead_signing_input(issuer, batch, tree.size(), root)
+        treehead_sig = signer.sign(signing_input)
+        blob = pq.encode_mtc(issuer, batch, tree.size(), 0, root, treehead_sig, proof)
+        return base64.b64encode(blob).decode("ascii")
 
     def verify(self, payload: bytes, proof_value: str, issuer_did: str) -> bool:
-        raise CryptosuiteError("cryptosuite 'merkle-tree-certs' verification is a stub")
+        dec = pq.decode_mtc(base64.b64decode(proof_value))
+        if dec is None:
+            return False
+        if dec.issuer != issuer_did.encode("utf-8"):
+            return False
+        if pq.mtc_recompute_root(dec, payload) != dec.root:
+            return False
+        pubkey = pubkey_from_did_key(issuer_did)
+        signing_input = pq.treehead_signing_input(
+            dec.issuer, dec.batch, dec.tree_size, dec.root
+        )
+        return ed25519_verify(pubkey, signing_input, dec.treehead_sig)
 
 
 CRYPTOSUITES: Dict[str, Cryptosuite] = {
     suite.name: suite
-    for suite in (EddsaJcs2022(), MldsaP256Stub(), MerkleTreeCertsStub())
+    for suite in (EddsaJcs2022(), MldsaP256(), MerkleTreeCerts())
 }
 
 

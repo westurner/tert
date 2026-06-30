@@ -1,0 +1,22 @@
+{
+  "@context": [
+    "https://www.w3.org/ns/credentials/v2"
+  ],
+  "credentialSubject": {
+    "id": "urn:example:1",
+    "name": "Ada",
+    "u": "caf\u00e9 \u2603"
+  },
+  "issuer": "did:key:z6MkneMkZqwqRiU5mJzSG3kDwzt9P8C59N4NGTfBLfSGE7c7",
+  "proof": {
+    "created": "2020-01-01T00:00:00Z",
+    "cryptosuite": "merkle-tree-certs",
+    "proofPurpose": "assertionMethod",
+    "proofValue": "TVRDMQA4ZGlkOmtleTp6Nk1rbmVNa1pxd3FSaVU1bUp6U0cza0R3enQ5UDhDNTlONE5HVGZCTGZTR0U3YzcAAAAAAAAAAAAAAAEAAAAAAAAAACpANnYMyHskDSlLbI4ysAKnT4SD1cyQk1w2cIwxkLwAAEBMWatGVbg58Jqhgm2PNplfi8Eb0+IHmwilUqrQiNyfHo+3pWYeU+5/MhRbW3OlxMmPE1AdQWOeclqxvOu6q7oKAAA=",
+    "type": "DataIntegrityProof",
+    "verificationMethod": "did:key:z6MkneMkZqwqRiU5mJzSG3kDwzt9P8C59N4NGTfBLfSGE7c7#z6MkneMkZqwqRiU5mJzSG3kDwzt9P8C59N4NGTfBLfSGE7c7"
+  },
+  "type": [
+    "VerifiableCredential"
+  ]
+}

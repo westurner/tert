@@ -156,11 +156,25 @@ tert vc sign doc.yaml --keys-dir ./keys -o doc.signed.yaml
 tert vc verify doc.signed.yaml
 ```
 
-| cryptosuite          | status | notes                                          |
-|----------------------|--------|------------------------------------------------|
-| `eddsa-jcs-2022`     | ready  | Ed25519 over canonical JSON (default)          |
-| `mldsa-87-p256`      | stub   | post-quantum hybrid ML-DSA-87 + ECDSA-P256     |
-| `merkle-tree-certs`  | stub   | Merkle Tree Certificates                       |
+| cryptosuite          | status            | notes                                       |
+|----------------------|-------------------|---------------------------------------------|
+| `eddsa-jcs-2022`     | ready (Py + Rust) | Ed25519 over canonical JSON (default)       |
+| `mldsa-87-p256`      | ready (Py + Rust) | hybrid ML-DSA-87 (FIPS 204) + ECDSA-P256    |
+| `merkle-tree-certs`  | ready (Py + Rust) | Merkle Tree Certificates (signed tree head + inclusion proof) |
+
+`mldsa-87-p256` is a composite signature: a verifier must accept **both** the
+ML-DSA-87 (post-quantum) and ECDSA-P256 component signatures, so it stays secure
+as long as either algorithm is unbroken. `merkle-tree-certs` follows the
+[Merkle Tree Certificates](https://datatracker.ietf.org/doc/draft-davidben-tls-merkle-tree-certs/)
+design being deployed by [Cloudflare](https://blog.cloudflare.com/bootstrap-mtc/)
+and [Let's Encrypt](https://letsencrypt.org/2026/06/03/pq-certs): the issuer
+arranges per-credential assertions into a Merkle tree, signs only the tree head,
+and each credential carries a signatureless inclusion proof. Both suites are
+implemented in Rust (`tert::pq`, using the audited `fips204` + `p256` crates) and
+in pure-Python stdlib-only code (`tert.pq`, a from-scratch FIPS 204 ML-DSA-87 and
+ECDSA-P256). The two implementations are byte-compatible: signatures produced by
+either language verify in the other (interop is covered by committed fixtures and
+tests in both test suites).
 
 The canonicalization (a JCS-style subset) and `eddsa-jcs-2022` proofs are
 byte-for-byte interoperable between Python (`tert.vc`) and Rust (`tert::vc`,

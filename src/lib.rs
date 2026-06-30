@@ -9,6 +9,7 @@ pub mod fetch;
 pub mod crypto;
 pub mod did_agent;
 pub mod vc;
+pub mod pq;
 
 use pyo3::prelude::*;
 use regex::Regex;
