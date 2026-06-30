@@ -96,7 +96,7 @@ pub fn base64_decode(text: &str) -> Option<Vec<u8>> {
 
 fn hex_decode(text: &str) -> Option<Vec<u8>> {
     let t = text.trim();
-    if t.len() % 2 != 0 {
+    if !t.len().is_multiple_of(2) {
         return None;
     }
     let mut out = Vec::with_capacity(t.len() / 2);
@@ -311,7 +311,7 @@ impl DidAgentClient {
             Ok(String::new())
         } else {
             let msg = response.strip_prefix("ERR ").unwrap_or(&response).to_string();
-            Err(io::Error::new(io::ErrorKind::Other, msg))
+            Err(io::Error::other(msg))
         }
     }
 

@@ -856,7 +856,7 @@ impl TestRunner for VitestRunner {
         let mut cmd = Command::new("npx");
         cmd.arg("vitest")
             .arg("run")
-            .arg(format!("--reporter=junit"))
+            .arg("--reporter=junit")
             .arg(format!("--outputFile={}/junit.xml", self.out_dir.display()))
             .args(args);
         

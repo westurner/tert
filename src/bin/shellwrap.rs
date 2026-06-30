@@ -233,11 +233,11 @@ alias tree='tree -C'
             .spawn()?;
 
         let stdout = child.stdout.take().ok_or_else(|| {
-            io::Error::new(io::ErrorKind::Other, "Failed to capture stdout")
+            io::Error::other("Failed to capture stdout")
         })?;
 
         let stderr = child.stderr.take().ok_or_else(|| {
-            io::Error::new(io::ErrorKind::Other, "Failed to capture stderr")
+            io::Error::other("Failed to capture stderr")
         })?;
 
         // Thread to read stdout
@@ -245,13 +245,11 @@ alias tree='tree -C'
             let ansi_output_clone = Arc::clone(&ansi_output_clone);
             thread::spawn(move || {
                 let reader = BufReader::new(stdout);
-                for line in reader.lines() {
-                    if let Ok(line) = line {
-                        let line_with_newline = format!("{}\n", line);
-                        print!("{}", line_with_newline);
-                        let mut output = ansi_output_clone.lock().unwrap();
-                        output.push_str(&line_with_newline);
-                    }
+                for line in reader.lines().flatten() {
+                    let line_with_newline = format!("{}\n", line);
+                    print!("{}", line_with_newline);
+                    let mut output = ansi_output_clone.lock().unwrap();
+                    output.push_str(&line_with_newline);
                 }
             })
         };
@@ -261,13 +259,11 @@ alias tree='tree -C'
             let ansi_output_clone = Arc::clone(&ansi_output_clone);
             thread::spawn(move || {
                 let reader = BufReader::new(stderr);
-                for line in reader.lines() {
-                    if let Ok(line) = line {
-                        let line_with_newline = format!("{}\n", line);
-                        eprint!("{}", line_with_newline);
-                        let mut output = ansi_output_clone.lock().unwrap();
-                        output.push_str(&line_with_newline);
-                    }
+                for line in reader.lines().flatten() {
+                    let line_with_newline = format!("{}\n", line);
+                    eprint!("{}", line_with_newline);
+                    let mut output = ansi_output_clone.lock().unwrap();
+                    output.push_str(&line_with_newline);
                 }
             })
         };
@@ -310,16 +306,14 @@ alias tree='tree -C'
     /// Print color palette to stdout
     fn print_colors(&self) {
         println!("Standard Colors:");
-        let colors = vec![
-            ("BLACK", 30),
+        let colors = [("BLACK", 30),
             ("RED", 31),
             ("GREEN", 32),
             ("YELLOW", 33),
             ("BLUE", 34),
             ("MAGENTA", 35),
             ("CYAN", 36),
-            ("WHITE", 37),
-        ];
+            ("WHITE", 37)];
 
         for (name, code) in colors.iter() {
             println!("\x1b[{}m{:<12} (code: {})\x1b[0m", code, name, code);

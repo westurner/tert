@@ -86,8 +86,7 @@ impl Shellwrap {
 
     /// Get the resolved shell command
     fn get_shell_command(&self, cmd: &str) -> (String, Vec<String>) {
-        let shell = self.shell.as_ref()
-            .map(|s| s.as_str())
+        let shell = self.shell.as_deref()
             .unwrap_or("bash");
 
         let shell_exe = if shell.starts_with('/') {
