@@ -381,17 +381,21 @@ pub struct SignOptions<'a> {
     pub cryptosuite: &'a str,
 }
 
+/// Parameters for `build_provenance`.
+pub struct ProvenanceParams<'a> {
+    pub url: &'a str,
+    pub dest: &'a str,
+    pub sha256: Option<&'a str>,
+    pub bytes: Option<u64>,
+    pub strategy: &'a str,
+    pub cfg: &'a CryptoConfig,
+    pub tls_version: Option<&'a str>,
+    pub tls_cipher: Option<&'a str>,
+}
+
 /// Build an unsigned VC/PROV provenance document for a completed fetch.
-pub fn build_provenance(
-    url: &str,
-    dest: &str,
-    sha256: Option<&str>,
-    bytes: Option<u64>,
-    strategy: &str,
-    cfg: &CryptoConfig,
-    tls_version: Option<&str>,
-    tls_cipher: Option<&str>,
-) -> serde_json::Value {
+pub fn build_provenance(p: ProvenanceParams<'_>) -> serde_json::Value {
+    let ProvenanceParams { url, dest, sha256, bytes, strategy, cfg, tls_version, tls_cipher } = p;
     serde_json::json!({
         "@context": [
             "https://www.w3.org/ns/credentials/v2",
@@ -482,16 +486,16 @@ pub fn fetch_opts(
     };
 
     if let Some(opts) = sign {
-        let prov = build_provenance(
+        let prov = build_provenance(ProvenanceParams {
             url,
             dest,
-            sha256.as_deref(),
+            sha256: sha256.as_deref(),
             bytes,
-            strategy.name(),
-            &cfg,
-            tls_version.as_deref(),
-            tls_cipher.as_deref(),
-        );
+            strategy: strategy.name(),
+            cfg: &cfg,
+            tls_version: tls_version.as_deref(),
+            tls_cipher: tls_cipher.as_deref(),
+        });
         let signed = crate::vc::sign_document(&prov, opts.signer, opts.cryptosuite, None)
             .map_err(|e| FetchError::SigningFailed(e.to_string()))?;
         let sidecar = format!("{}.prov.json", dest);

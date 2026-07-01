@@ -10,6 +10,21 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use chrono::{DateTime, Utc};
 use rusqlite::{Connection, params};
 
+/// Fields for inserting a single artifact record.
+pub struct ArtifactRecord<'a> {
+    pub epoch_ns: u64,
+    pub timestamp_ns: &'a str,
+    pub out_dir: &'a Path,
+    pub filename: &'a str,
+    pub content: &'a str,
+    pub command: &'a str,
+    pub exit_code: i32,
+}
+
+/// Row returned by `ReplogDB::query_artifacts`:
+/// `(epoch_ns, exit_code, command, filename, content, out_dir, timestamp_ns, full_path)`
+pub type ArtifactRow = (u64, i32, String, String, String, PathBuf, String, String);
+
 /// Metadata for a single test run
 #[derive(Debug, Clone)]
 pub struct TestRun {
@@ -613,14 +628,17 @@ impl ReplogDB {
     /// Insert a test artifact linked to a test run by epoch_ns
     pub fn insert_artifact(
         &self,
-        epoch_ns: u64,
-        timestamp_ns: &str,
-        out_dir: &Path,
-        filename: &str,
-        content: &str,
-        command: &str,
-        exit_code: i32,
+        artifact: ArtifactRecord<'_>,
     ) -> rusqlite::Result<()> {
+        let (epoch_ns, timestamp_ns, out_dir, filename, content, command, exit_code) = (
+            artifact.epoch_ns,
+            artifact.timestamp_ns,
+            artifact.out_dir,
+            artifact.filename,
+            artifact.content,
+            artifact.command,
+            artifact.exit_code,
+        );
         let conn = Connection::open(&self.db_path)?;
         conn.execute("PRAGMA foreign_keys = ON", [])?;
 
@@ -660,7 +678,7 @@ impl ReplogDB {
     }
 
     /// Query test artifacts - returns (epoch_ns, exit_code, command, filename, content, out_dir, timestamp_ns, full_path)
-    pub fn query_artifacts(&self) -> rusqlite::Result<Vec<(u64, i32, String, String, String, PathBuf, String, String)>> {
+    pub fn query_artifacts(&self) -> rusqlite::Result<Vec<ArtifactRow>> {
         let conn = Connection::open(&self.db_path)?;
         let mut stmt = conn.prepare(
             "SELECT epoch_ns, exit_code, COALESCE(command, ''), filename, content, out_dir, timestamp_ns, COALESCE(full_path, out_dir || '/' || filename) FROM test_artifacts ORDER BY epoch_ns DESC"
@@ -729,13 +747,13 @@ impl TestRunner for PytestRunner {
 
 /// Cargo test runner
 pub struct CargoRunner {
-    out_dir: PathBuf,
+    _out_dir: PathBuf,
 }
 
 impl CargoRunner {
     pub fn new(out_dir: impl AsRef<Path>) -> Self {
         CargoRunner {
-            out_dir: out_dir.as_ref().to_path_buf(),
+            _out_dir: out_dir.as_ref().to_path_buf(),
         }
     }
 }
@@ -776,13 +794,13 @@ impl TestRunner for CargoRunner {
 
 /// Go test runner
 pub struct GoRunner {
-    out_dir: PathBuf,
+    _out_dir: PathBuf,
 }
 
 impl GoRunner {
     pub fn new(out_dir: impl AsRef<Path>) -> Self {
         GoRunner {
-            out_dir: out_dir.as_ref().to_path_buf(),
+            _out_dir: out_dir.as_ref().to_path_buf(),
         }
     }
 }
@@ -803,13 +821,13 @@ impl TestRunner for GoRunner {
 
 /// Jest test runner
 pub struct JestRunner {
-    out_dir: PathBuf,
+    _out_dir: PathBuf,
 }
 
 impl JestRunner {
     pub fn new(out_dir: impl AsRef<Path>) -> Self {
         JestRunner {
-            out_dir: out_dir.as_ref().to_path_buf(),
+            _out_dir: out_dir.as_ref().to_path_buf(),
         }
     }
 }
@@ -861,13 +879,13 @@ impl TestRunner for VitestRunner {
 
 /// Tox test runner
 pub struct ToxRunner {
-    out_dir: PathBuf,
+    _out_dir: PathBuf,
 }
 
 impl ToxRunner {
     pub fn new(out_dir: impl AsRef<Path>) -> Self {
         ToxRunner {
-            out_dir: out_dir.as_ref().to_path_buf(),
+            _out_dir: out_dir.as_ref().to_path_buf(),
         }
     }
 }
@@ -993,13 +1011,13 @@ fn interpreter_args(args: &[&str], command_flag: Option<&str>) -> Vec<String> {
 
 /// Sh script runner
 pub struct ShRunner {
-    out_dir: PathBuf,
+    _out_dir: PathBuf,
 }
 
 impl ShRunner {
     pub fn new(out_dir: impl AsRef<Path>) -> Self {
         ShRunner {
-            out_dir: out_dir.as_ref().to_path_buf(),
+            _out_dir: out_dir.as_ref().to_path_buf(),
         }
     }
 }
@@ -1020,13 +1038,13 @@ impl TestRunner for ShRunner {
 
 /// Bash script runner
 pub struct BashRunner {
-    out_dir: PathBuf,
+    _out_dir: PathBuf,
 }
 
 impl BashRunner {
     pub fn new(out_dir: impl AsRef<Path>) -> Self {
         BashRunner {
-            out_dir: out_dir.as_ref().to_path_buf(),
+            _out_dir: out_dir.as_ref().to_path_buf(),
         }
     }
 }
@@ -1047,13 +1065,13 @@ impl TestRunner for BashRunner {
 
 /// Zsh script runner
 pub struct ZshRunner {
-    out_dir: PathBuf,
+    _out_dir: PathBuf,
 }
 
 impl ZshRunner {
     pub fn new(out_dir: impl AsRef<Path>) -> Self {
         ZshRunner {
-            out_dir: out_dir.as_ref().to_path_buf(),
+            _out_dir: out_dir.as_ref().to_path_buf(),
         }
     }
 }
@@ -1074,13 +1092,13 @@ impl TestRunner for ZshRunner {
 
 /// Python script runner
 pub struct PythonRunner {
-    out_dir: PathBuf,
+    _out_dir: PathBuf,
 }
 
 impl PythonRunner {
     pub fn new(out_dir: impl AsRef<Path>) -> Self {
         PythonRunner {
-            out_dir: out_dir.as_ref().to_path_buf(),
+            _out_dir: out_dir.as_ref().to_path_buf(),
         }
     }
 }
@@ -1101,13 +1119,13 @@ impl TestRunner for PythonRunner {
 
 /// IPython script runner
 pub struct IpythonRunner {
-    out_dir: PathBuf,
+    _out_dir: PathBuf,
 }
 
 impl IpythonRunner {
     pub fn new(out_dir: impl AsRef<Path>) -> Self {
         IpythonRunner {
-            out_dir: out_dir.as_ref().to_path_buf(),
+            _out_dir: out_dir.as_ref().to_path_buf(),
         }
     }
 }
@@ -1439,15 +1457,15 @@ mod tests {
         for i in 0..count {
             db_fixture
                 .db
-                .insert_artifact(
-                    1_000_000_000 + i as u64,
-                    &ts,
-                    &out_dir,
-                    &format!("file{i}.log"),
+                .insert_artifact(ArtifactRecord {
+                    epoch_ns: 1_000_000_000 + i as u64,
+                    timestamp_ns: &ts,
+                    out_dir: &out_dir,
+                    filename: &format!("file{i}.log"),
                     content,
-                    "pytest",
-                    0,
-                )
+                    command: "pytest",
+                    exit_code: 0,
+                })
                 .unwrap_or_else(|e| panic!("insert artifact {i}: {e}"));
         }
 
@@ -1471,7 +1489,15 @@ mod tests {
 
         db_fixture
             .db
-            .insert_artifact(1_000_000_000, &ts, &out_dir, "artifact.json", "{}", "", 0)
+            .insert_artifact(ArtifactRecord {
+                epoch_ns: 1_000_000_000,
+                timestamp_ns: &ts,
+                out_dir: &out_dir,
+                filename: "artifact.json",
+                content: "{}",
+                command: "",
+                exit_code: 0,
+            })
             .expect("insert artifact");
 
         let artifacts = db_fixture.db.query_artifacts().expect("query artifacts");
@@ -1488,15 +1514,15 @@ mod tests {
 
         db_fixture
             .db
-            .insert_artifact(
-                1_000_000_000,
-                &get_timestamp_ns(),
-                &out_dir,
-                "large.log",
-                &large_content,
-                "",
-                0,
-            )
+            .insert_artifact(ArtifactRecord {
+                epoch_ns: 1_000_000_000,
+                timestamp_ns: &get_timestamp_ns(),
+                out_dir: &out_dir,
+                filename: "large.log",
+                content: &large_content,
+                command: "",
+                exit_code: 0,
+            })
             .expect("insert large artifact");
 
         let artifacts = db_fixture.db.query_artifacts().expect("query artifacts");
@@ -1518,15 +1544,15 @@ mod tests {
 
         db_fixture
             .db
-            .insert_artifact(
-                1_000_000_000,
-                &get_timestamp_ns(),
-                &out_dir,
-                "file (1).log",
-                "content",
-                "",
-                0,
-            )
+            .insert_artifact(ArtifactRecord {
+                epoch_ns: 1_000_000_000,
+                timestamp_ns: &get_timestamp_ns(),
+                out_dir: &out_dir,
+                filename: "file (1).log",
+                content: "content",
+                command: "",
+                exit_code: 0,
+            })
             .expect("insert artifact");
 
         let artifacts = db_fixture.db.query_artifacts().expect("query artifacts");

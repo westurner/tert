@@ -244,7 +244,7 @@ alias tree='tree -C'
             let ansi_output_clone = Arc::clone(&ansi_output_clone);
             thread::spawn(move || {
                 let reader = BufReader::new(stdout);
-                for line in reader.lines().flatten() {
+                for line in reader.lines().map_while(Result::ok) {
                     let line_with_newline = format!("{}\n", line);
                     print!("{}", line_with_newline);
                     let mut output = ansi_output_clone.lock().unwrap();
@@ -258,7 +258,7 @@ alias tree='tree -C'
             let ansi_output_clone = Arc::clone(&ansi_output_clone);
             thread::spawn(move || {
                 let reader = BufReader::new(stderr);
-                for line in reader.lines().flatten() {
+                for line in reader.lines().map_while(Result::ok) {
                     let line_with_newline = format!("{}\n", line);
                     eprint!("{}", line_with_newline);
                     let mut output = ansi_output_clone.lock().unwrap();
@@ -272,9 +272,7 @@ alias tree='tree -C'
         let _ = stderr_handle.join();
 
         // Get exit code
-        let exit_code = match child.wait()? {
-            status => status.code().unwrap_or(1),
-        };
+        let exit_code = child.wait()?.code().unwrap_or(1);
 
         // Write logs with captured output
         let output = ansi_output.lock().unwrap().clone();
